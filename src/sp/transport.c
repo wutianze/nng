@@ -69,6 +69,9 @@ extern void nni_sp_wss_register(void);
 #ifdef NNG_TRANSPORT_ZEROTIER
 extern void nni_sp_zt_register(void);
 #endif
+#ifdef NNG_TRANSPORT_MIX
+extern void nni_sp_mix_register(void);
+#endif
 
 void
 nni_sp_tran_sys_init(void)
@@ -96,6 +99,9 @@ nni_sp_tran_sys_init(void)
 #endif
 #ifdef NNG_TRANSPORT_ZEROTIER
 	nni_sp_zt_register();
+#endif
+#ifdef NNG_TRANSPORT_MIX
+	nni_sp_mix_register();
 #endif
 }
 
