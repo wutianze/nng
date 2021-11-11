@@ -1255,14 +1255,14 @@ static nni_sp_tran mix6_tran = {
 
 #ifndef NNG_ELIDE_DEPRECATED
 int
-nng_tcp_register(void)
+nng_mix_register(void)
 {
 	return (nni_init());
 }
 #endif
 
 void
-nni_sp_tcp_register(void)
+nni_sp_mix_register(void)
 {
 	nni_sp_tran_register(&mix_tran);
 	nni_sp_tran_register(&mix4_tran);

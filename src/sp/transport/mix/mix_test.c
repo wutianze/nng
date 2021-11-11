@@ -22,7 +22,7 @@ test_mix_wild_card_connect_fail(void)
 	char       addr[NNG_MAXADDRLEN];
 
 	NUTS_OPEN(s);
-	(void) snprintf(addr, sizeof(addr), "tcp://*:%u", nuts_next_port());
+	(void) snprintf(addr, sizeof(addr), "mix+tcp://*:%u", nuts_next_port());
 	NUTS_FAIL(nng_dial(s, addr, NULL, 0), NNG_EADDRINVAL);
 	NUTS_CLOSE(s);
 }
@@ -39,9 +39,9 @@ test_mix_wild_card_bind(void)
 
 	NUTS_OPEN(s1);
 	NUTS_OPEN(s2);
-	(void) snprintf(addr, sizeof(addr), "tcp4://*:%u", port);
+	(void) snprintf(addr, sizeof(addr), "mix+tcp4://*:%u", port);
 	NUTS_PASS(nng_listen(s1, addr, NULL, 0));
-	(void) snprintf(addr, sizeof(addr), "tcp://127.0.0.1:%u", port);
+	(void) snprintf(addr, sizeof(addr), "mix+tcp://127.0.0.1:%u", port);
 	NUTS_PASS(nng_dial(s2, addr, NULL, 0));
 	NUTS_CLOSE(s2);
 	NUTS_CLOSE(s1);
@@ -59,10 +59,10 @@ test_mix_local_address_connect(void)
 	NUTS_OPEN(s1);
 	NUTS_OPEN(s2);
 	port = nuts_next_port();
-	(void) snprintf(addr, sizeof(addr), "tcp://127.0.0.1:%u", port);
+	(void) snprintf(addr, sizeof(addr), "mix+tcp://127.0.0.1:%u", port);
 	NUTS_PASS(nng_listen(s1, addr, NULL, 0));
 	(void) snprintf(
-	    addr, sizeof(addr), "tcp://127.0.0.1;127.0.0.1:%u", port);
+	    addr, sizeof(addr), "mix+tcp://127.0.0.1;127.0.0.1:%u", port);
 	NUTS_PASS(nng_dial(s2, addr, NULL, 0));
 	NUTS_CLOSE(s2);
 	NUTS_CLOSE(s1);
@@ -79,9 +79,9 @@ test_mix_port_zero_bind(void)
 
 	NUTS_OPEN(s1);
 	NUTS_OPEN(s2);
-	NUTS_PASS(nng_listen(s1, "tcp://127.0.0.1:0", &l, 0));
+	NUTS_PASS(nng_listen(s1, "mix+tcp://127.0.0.1:0", &l, 0));
 	NUTS_PASS(nng_listener_get_string(l, NNG_OPT_URL, &addr));
-	NUTS_TRUE(memcmp(addr, "tcp://", 6) == 0);
+	NUTS_TRUE(memcmp(addr, "mix+tcp://", 6) == 0);
 	NUTS_PASS(nng_listener_get_addr(l, NNG_OPT_LOCADDR, &sa));
 	NUTS_TRUE(sa.s_in.sa_family == NNG_AF_INET);
 	NUTS_TRUE(sa.s_in.sa_port != 0);
@@ -99,7 +99,7 @@ test_mix_bad_local_interface(void)
 	int rv;
 
 	NUTS_OPEN(s1);
-	rv = nng_dial(s1, "tcp://bogus1;127.0.0.1:80", NULL, 0),
+	rv = nng_dial(s1, "mix+tcp://bogus1;127.0.0.1:80", NULL, 0),
 	NUTS_TRUE(rv != 0);
 	NUTS_TRUE(rv != NNG_ECONNREFUSED);
 	NUTS_CLOSE(s1);
@@ -111,7 +111,7 @@ test_mix_non_local_address(void)
 	nng_socket s1;
 
 	NUTS_OPEN(s1);
-	NUTS_FAIL(nng_dial(s1, "tcp://8.8.8.8;127.0.0.1:80", NULL, 0),
+	NUTS_FAIL(nng_dial(s1, "mix+tcp://8.8.8.8;127.0.0.1:80", NULL, 0),
 	    NNG_EADDRINVAL);
 	NUTS_CLOSE(s1);
 }
@@ -123,15 +123,15 @@ test_mix_malformed_address(void)
 
 	NUTS_OPEN(s1);
 	NUTS_FAIL(
-	    nng_dial(s1, "tcp://127.0.0.1", NULL, 0), NNG_EADDRINVAL);
+	    nng_dial(s1, "mix+tcp://127.0.0.1", NULL, 0), NNG_EADDRINVAL);
 	NUTS_FAIL(
-	    nng_dial(s1, "tcp://127.0.0.1.32", NULL, 0), NNG_EADDRINVAL);
+	    nng_dial(s1, "mix+tcp://127.0.0.1.32", NULL, 0), NNG_EADDRINVAL);
 	NUTS_FAIL(
-	    nng_dial(s1, "tcp://127.0.x.1.32", NULL, 0), NNG_EADDRINVAL);
+	    nng_dial(s1, "mix+tcp://127.0.x.1.32", NULL, 0), NNG_EADDRINVAL);
 	NUTS_FAIL(
-	    nng_listen(s1, "tcp://127.0.0.1.32", NULL, 0), NNG_EADDRINVAL);
+	    nng_listen(s1, "mix+tcp://127.0.0.1.32", NULL, 0), NNG_EADDRINVAL);
 	NUTS_FAIL(
-	    nng_listen(s1, "tcp://127.0.x.1.32", NULL, 0), NNG_EADDRINVAL);
+	    nng_listen(s1, "mix+tcp://127.0.x.1.32", NULL, 0), NNG_EADDRINVAL);
 	NUTS_CLOSE(s1);
 }
 
