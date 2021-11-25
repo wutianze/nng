@@ -127,10 +127,6 @@ CMAKE_DEPENDENT_OPTION(NNG_TRANSPORT_WSS "Enable WSS transport." ON
         "NNG_ENABLE_TLS" OFF)
 mark_as_advanced(NNG_TRANSPORT_WSS)
 
-# MIX transport
-option (NNG_TRANSPORT_MIX "Enable MIX transport." ON)
-mark_as_advanced(NNG_TRANSPORT_MIX)
-
 # ZeroTier
 option (NNG_TRANSPORT_ZEROTIER "Enable ZeroTier transport (requires libzerotiercore)." OFF)
 mark_as_advanced(NNG_TRANSPORT_ZEROTIER)

@@ -182,6 +182,7 @@ extern int nni_proto_open(nng_socket *, const nni_proto *);
 // SURVEYORv0    6   2  surveyor   minors 0 & 1 retired
 // RESPONDENTv0  6   3  respondent
 // BUSv0         7   0  bus
+// MIXv0         8   0  mix        use mixed NIC
 // STARv0      100   0  star       mangos only, experimental
 //
 

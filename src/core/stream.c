@@ -94,21 +94,6 @@ static struct {
 	    .dialer_alloc   = nni_ws_dialer_alloc,
 	    .listener_alloc = nni_ws_listener_alloc,
 	},
-	{
-	    .scheme         = "mix+tcp",
-	    .dialer_alloc   = nni_tcp_dialer_alloc,
-	    .listener_alloc = nni_tcp_listener_alloc,
-	},
-	{
-	    .scheme         = "mix+tcp4",
-	    .dialer_alloc   = nni_tcp_dialer_alloc,
-	    .listener_alloc = nni_tcp_listener_alloc,
-	},
-	{
-	    .scheme         = "mix+tcp6",
-	    .dialer_alloc   = nni_tcp_dialer_alloc,
-	    .listener_alloc = nni_tcp_listener_alloc,
-	},
 
 	{
 	    .scheme = NULL,
