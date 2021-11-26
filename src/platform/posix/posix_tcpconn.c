@@ -415,7 +415,12 @@ tcp_set_keepalive(void *arg, const void *buf, size_t sz, nni_type t)
 static int
 tcp_set_devicename(void *arg, const void *buf, size_t sz, nni_type t)
 {
-	//TODO
+	nni_tcp_conn *c = arg;
+	int           fd = nni_posix_pfd_fd(c->pfd);
+	if(setsockopt(fd, SOL_SOCKET, SO_BINDTODEVICE, (char*)buf,sz) != 0){
+		return (nni_plat_errno(errno));
+	}
+	return (0);
 }
 
 static int

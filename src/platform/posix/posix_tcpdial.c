@@ -313,7 +313,32 @@ tcp_dialer_get_keepalive(void *arg, void *buf, size_t *szp, nni_type t)
 	nni_mtx_unlock(&d->mtx);
 	return (nni_copyout_bool(b, buf, szp, t));
 }
+static int
+tcp_dialer_set_devicename(void *arg, const void *buf, size_t sz, nni_type t)
+{
+	nni_tcp_dialer *d = arg;
+	int             rv;
+	char           *s;
 
+TODO	if (((rv = nni_copyin_str(s, buf, sz, t)) != 0) || (d == NULL)) {
+		return (rv);
+	}
+	nni_mtx_lock(&d->mtx);
+	d->keepalive = b;
+	nni_mtx_unlock(&d->mtx);
+	return (0);
+}
+
+static int
+tcp_dialer_get_devicename(void *arg, void *buf, size_t *szp, nni_type t)
+{
+	bool            b;
+	nni_tcp_dialer *d = arg;
+	nni_mtx_lock(&d->mtx);
+	b = d->keepalive;
+	nni_mtx_unlock(&d->mtx);
+	return (nni_copyout_bool(b, buf, szp, t));
+}
 static int
 tcp_dialer_get_locaddr(void *arg, void *buf, size_t *szp, nni_type t)
 {
@@ -391,6 +416,11 @@ static const nni_option tcp_dialer_options[] = {
 	    .o_name = NNG_OPT_TCP_KEEPALIVE,
 	    .o_get  = tcp_dialer_get_keepalive,
 	    .o_set  = tcp_dialer_set_keepalive,
+	},
+	{
+	    .o_name = NNG_OPT_TCP_BINDTODEVICE,
+	    .o_get  = tcp_dialer_get_devicename,
+	    .o_set  = tcp_dialer_set_devicename,
 	},
 	{
 	    .o_name = NULL,
