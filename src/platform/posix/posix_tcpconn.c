@@ -413,6 +413,12 @@ tcp_set_keepalive(void *arg, const void *buf, size_t sz, nni_type t)
 }
 
 static int
+tcp_set_devicename(void *arg, const void *buf, size_t sz, nni_type t)
+{
+	//TODO
+}
+
+static int
 tcp_get_nodelay(void *arg, void *buf, size_t *szp, nni_type t)
 {
 	nni_tcp_conn *c     = arg;
@@ -442,6 +448,26 @@ tcp_get_keepalive(void *arg, void *buf, size_t *szp, nni_type t)
 	return (nni_copyout_bool(val, buf, szp, t));
 }
 
+static int
+tcp_get_devicename(void *arg, void *buf, size_t *szp, nni_type t)
+{
+	nni_tcp_conn *c     = arg;
+	int           fd    = nni_posix_pfd_fd(c->pfd);
+	char*         val = nni_alloc(IFNAMSIZ);
+	if (val == NULL)return(nni_plat_errno(errno));
+	socklen_t     valsz = 0;
+	if (getsockopt(fd, SOL_SOCKET, SO_BINDTODEVICE, val, &valsz) != 0) {
+		return (nni_plat_errno(errno));
+	}
+	if(valsz > *szp){
+		//destination too small
+		return NNG_EINVAL;
+	}
+	*szp = valsz;
+	*(char**)buf = val;
+	return 0;
+}
+
 static const nni_option tcp_options[] = {
 	{
 	    .o_name = NNG_OPT_REMADDR,
@@ -460,6 +486,11 @@ static const nni_option tcp_options[] = {
 	    .o_name = NNG_OPT_TCP_KEEPALIVE,
 	    .o_get  = tcp_get_keepalive,
 	    .o_set  = tcp_set_keepalive,
+	},
+	{
+	    .o_name = NNG_OPT_TCP_BINDTODEVICE,
+	    .o_get  = tcp_get_devicename,
+	    .o_set  = tcp_set_devicename,
 	},
 	{
 	    .o_name = NULL,
@@ -513,13 +544,14 @@ nni_posix_tcp_init(nni_tcp_conn *c, nni_posix_pfd *pfd)
 }
 
 void
-nni_posix_tcp_start(nni_tcp_conn *c, int nodelay, int keepalive)
+nni_posix_tcp_start(nni_tcp_conn *c, int nodelay, int keepalive, char* devicename)
 {
 	// Configure the initial socket options.
 	(void) setsockopt(nni_posix_pfd_fd(c->pfd), IPPROTO_TCP, TCP_NODELAY,
 	    &nodelay, sizeof(int));
 	(void) setsockopt(nni_posix_pfd_fd(c->pfd), SOL_SOCKET, SO_KEEPALIVE,
 	    &keepalive, sizeof(int));
-
+	(void) setsockopt(nni_posix_pfd_fd(c->pfd), SOL_SOCKET, SO_BINDTODEVICE,
+	    devicename, strlen(devicename));
 	nni_posix_pfd_set_cb(c->pfd, tcp_cb, c);
 }

@@ -751,6 +751,15 @@ NNG_DECL nng_listener nng_pipe_listener(nng_pipe);
 // state current). This is a boolean.
 #define NNG_OPT_TCP_KEEPALIVE "tcp-keepalive"
 
+// TCP bindtodevice binds a specific interface to the socket. 
+// This is used for protocol mix mainly. Unlike nodelay and keepalive,
+// the default value of device name is ""(shouldn't be NULL) which means the system helps
+// us decide which NIC to use. And this option shouldn't be bind to a socket
+// since it is meaningless to make every connections of a socket use the 
+// same NIC. We make it a dialer-specific option. When getting this value,
+// linux version must be later than 3.8. This is a string.
+#define NNG_OPT_TCP_BINDTODEVICE "tcp-bindtodevice"
+
 // Local TCP port number.  This is used on a listener, and is intended
 // to be used after starting the listener in combination with a wildcard
 // (0) local port.  This determines the actual ephemeral port that was
