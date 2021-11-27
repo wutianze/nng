@@ -33,6 +33,7 @@ struct nni_tcp_dialer {
 	bool                    closed;
 	bool                    nodelay;
 	bool                    keepalive;
+	char                    *devicename;
 	struct sockaddr_storage src;
 	size_t                  srclen;
 	nni_mtx                 mtx;

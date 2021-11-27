@@ -597,13 +597,14 @@ nni_sock_create(nni_sock **sp, const nni_proto *proto)
 	// These we *attempt* to call so that we are likely to have initial
 	// values loaded.  They should not fail, but if they do we don't
 	// worry about it.
+	//TODO useless, should remove ---
 	on = true;
 	(void) nni_sock_setopt(
 	    s, NNG_OPT_TCP_NODELAY, &on, sizeof(on), NNI_TYPE_BOOL);
 	on = false;
 	(void) nni_sock_setopt(
 	    s, NNG_OPT_TCP_KEEPALIVE, &on, sizeof(on), NNI_TYPE_BOOL);
-
+	//---
 	*sp = s;
 	return (rv);
 }
@@ -1081,7 +1082,7 @@ nni_sock_setopt(
 		}
 	}
 
-#ifndef NNG_ELIDE_DEPRCATED
+#ifndef NNG_ELIDE_DEPRECATED
 	nni_dialer *  d;
 	nni_listener *l;
 
