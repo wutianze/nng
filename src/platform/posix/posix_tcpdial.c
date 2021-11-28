@@ -253,7 +253,7 @@ nni_tcp_dial(nni_tcp_dialer *d, const nni_sockaddr *sa, nni_aio *aio)
 	nd = d->nodelay ? 1 : 0;
 	ka = d->keepalive ? 1 : 0;
 	nni_mtx_unlock(&d->mtx);
-	nni_posix_tcp_start(c, nd, ka);
+	nni_posix_tcp_start(c, nd, ka, d->devicename);
 	nni_aio_set_output(aio, 0, c);
 	nni_aio_finish(aio, 0, 0);
 	return;
