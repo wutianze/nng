@@ -166,7 +166,7 @@ tcp_dialer_cb(nni_posix_pfd *pfd, unsigned ev, void *arg)
 		return;
 	}
 
-	nni_posix_tcp_start(c, nd, ka, d->devicename);
+	nni_posix_tcp_start(c, nd, ka);
 	nni_aio_set_output(aio, 0, c);
 	nni_aio_finish(aio, 0, 0);
 }
@@ -232,6 +232,13 @@ nni_tcp_dial(nni_tcp_dialer *d, const nni_sockaddr *sa, nni_aio *aio)
 	if ((rv = nni_aio_schedule(aio, tcp_dialer_cancel, d)) != 0) {
 		goto error;
 	}
+	
+	// set devicename must be before connect, so we put it here not in nni_posix_tcp_start
+	if(setsockopt(fd, SOL_SOCKET, SO_BINDTODEVICE, d->devicename, strlen(d->devicename)) != 0){
+		    rv = nni_plat_errno(errno);
+		    goto error;
+	}
+	
 	if (connect(fd, (void *) &ss, sslen) != 0) {
 		if (errno != EINPROGRESS) {
 			rv = nni_plat_errno(errno);
@@ -253,7 +260,7 @@ nni_tcp_dial(nni_tcp_dialer *d, const nni_sockaddr *sa, nni_aio *aio)
 	nd = d->nodelay ? 1 : 0;
 	ka = d->keepalive ? 1 : 0;
 	nni_mtx_unlock(&d->mtx);
-	nni_posix_tcp_start(c, nd, ka, d->devicename);
+	nni_posix_tcp_start(c, nd, ka);
 	nni_aio_set_output(aio, 0, c);
 	nni_aio_finish(aio, 0, 0);
 	return;

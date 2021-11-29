@@ -549,14 +549,12 @@ nni_posix_tcp_init(nni_tcp_conn *c, nni_posix_pfd *pfd)
 }
 
 void
-nni_posix_tcp_start(nni_tcp_conn *c, int nodelay, int keepalive, char* devicename)
+nni_posix_tcp_start(nni_tcp_conn *c, int nodelay, int keepalive)
 {
 	// Configure the initial socket options.
 	(void) setsockopt(nni_posix_pfd_fd(c->pfd), IPPROTO_TCP, TCP_NODELAY,
 	    &nodelay, sizeof(int));
 	(void) setsockopt(nni_posix_pfd_fd(c->pfd), SOL_SOCKET, SO_KEEPALIVE,
 	    &keepalive, sizeof(int));
-	(void) setsockopt(nni_posix_pfd_fd(c->pfd), SOL_SOCKET, SO_BINDTODEVICE,
-	    devicename, strlen(devicename));
 	nni_posix_pfd_set_cb(c->pfd, tcp_cb, c);
 }
