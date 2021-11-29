@@ -20,6 +20,7 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/uio.h>
+#include <net/if.h>
 
 #ifndef MSG_NOSIGNAL
 #define MSG_NOSIGNAL 0
@@ -420,6 +421,7 @@ tcp_set_devicename(void *arg, const void *buf, size_t sz, nni_type t)
 	if(setsockopt(fd, SOL_SOCKET, SO_BINDTODEVICE, (char*)buf,sz) != 0){
 		return (nni_plat_errno(errno));
 	}
+	NNI_ARG_UNUSED(t);
 	return (0);
 }
 

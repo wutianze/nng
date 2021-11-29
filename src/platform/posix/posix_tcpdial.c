@@ -16,6 +16,7 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <net/if.h>
 
 #ifndef SOCK_CLOEXEC
 #define SOCK_CLOEXEC 0
@@ -36,7 +37,7 @@ nni_tcp_dialer_init(nni_tcp_dialer **dp)
 	d->closed = false;
 	d->nodelay = true;
 	d->keepalive = false;
-	d->devicename = nni_alloc(INFNAMSIZ);
+	d->devicename = nni_alloc(IFNAMSIZ);
 	d->devicename = '\0';
 	nni_aio_list_init(&d->connq);
 	nni_atomic_init_bool(&d->fini);
@@ -72,7 +73,7 @@ static void
 tcp_dialer_fini(nni_tcp_dialer *d)
 {
 	nni_mtx_fini(&d->mtx);
-	nni_free(d->devicename);
+	nni_free(d->devicename,0);//the second arg is unused
 	NNI_FREE_STRUCT(d);
 }
 
