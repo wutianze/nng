@@ -44,7 +44,7 @@ int
 send_recv(nng_socket sock, char *name)
 {
         int rv;
-        if ((rv = nng_set_ms(sock, NNG_OPT_RECVTIMEO, 100)) != 0) {
+        if ((rv = nng_socket_set_ms(sock, NNG_OPT_RECVTIMEO, 100)) != 0) {
                 fatal("nng_setopt_ms", rv);
         }
         for (;;) {
