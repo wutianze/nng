@@ -472,6 +472,7 @@ tcp_get_devicename(void *arg, void *buf, size_t *szp, nni_type t)
 	}
 	*szp = valsz;
 	*(char**)buf = val;
+	NNI_ARG_UNUSED(t);
 	return 0;
 }
 

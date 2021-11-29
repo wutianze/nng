@@ -331,10 +331,9 @@ tcp_dialer_set_devicename(void *arg, const void *buf, size_t sz, nni_type t)
 {
 	nni_tcp_dialer *d = arg;
 	int             rv;
-	char           *s;
 
 	nni_mtx_lock(&d->mtx);
-	if ((d == NULL) || ((rv = nni_copyin_str(d->devicename, buf, sz,IFNAMSIZ, t)) != 0)) {
+	if ((d == ULL) || ((rv = nni_copyin_str(d->devicename, buf, sz,IFNAMSIZ, t)) != 0)) {
 	nni_mtx_unlock(&d->mtx);
 		return (rv);
 	}
