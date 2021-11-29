@@ -38,7 +38,7 @@ nni_tcp_dialer_init(nni_tcp_dialer **dp)
 	d->nodelay = true;
 	d->keepalive = false;
 	d->devicename = nni_alloc(IFNAMSIZ);
-	d->devicename = '\0';
+	memset(d->devicename,0,IFNAMSIZ);
 	nni_aio_list_init(&d->connq);
 	nni_atomic_init_bool(&d->fini);
 	nni_atomic_init64(&d->ref);
