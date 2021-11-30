@@ -87,6 +87,11 @@ node1(const char *url)
         if((rv=nng_dialer_start(tmpd,NNG_FLAG_NONBLOCK))!=0){
                 fatal("nng_dialer_start", rv);
         }
+        char* check_devicename;
+        if((rv=nng_dialer_getopt_string(tmpd,NNG_OPT_TCP_BINDTODEVICE,&check_devicename))!=0){
+                fatal("nng_dialer_getopt_string", rv);
+        }
+        printf("device:%s is set\n",check_devicename);
         return (send_recv(sock, NODE1));
 }
 
