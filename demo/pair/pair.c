@@ -36,21 +36,37 @@ recv_name(nng_socket sock, char *name)
         if ((rv = nng_recv(sock, &buf, &sz, NNG_FLAG_ALLOC)) == 0) {
                 printf("%s: RECEIVED \"%s\"\n", name, buf); 
                 nng_free(buf, sz);
+        }else{
+                printf("RECEIVE error\n");
         }
         return (rv);
+}
+
+int
+recv_send(nng_socket sock, char *name)
+{
+        int rv;
+        /*if ((rv = nng_socket_set_ms(sock, NNG_OPT_RECVTIMEO, 100)) != 0) {
+                fatal("nng_setopt_ms", rv);
+        }*/
+        for (;;) {
+                recv_name(sock, name);
+                sleep(1);
+                send_name(sock, name);
+        }
 }
 
 int
 send_recv(nng_socket sock, char *name)
 {
         int rv;
-        if ((rv = nng_socket_set_ms(sock, NNG_OPT_RECVTIMEO, 100)) != 0) {
+        /*if ((rv = nng_socket_set_ms(sock, NNG_OPT_RECVTIMEO, 100)) != 0) {
                 fatal("nng_setopt_ms", rv);
-        }
+        }*/
         for (;;) {
-                recv_name(sock, name);
-                sleep(1);
                 send_name(sock, name);
+                sleep(1);
+                recv_name(sock, name);
         }
 }
 
@@ -65,7 +81,7 @@ node0(const char *url)
          if ((rv = nng_listen(sock, url, NULL, 0)) !=0) {
                 fatal("nng_listen", rv);
         }
-        return (send_recv(sock, NODE0));
+        return (recv_send(sock, NODE0));
 }
 
 int
