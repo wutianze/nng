@@ -100,7 +100,7 @@ node1(const char *url)
         if((rv = nng_dialer_setopt_string(tmpd,NNG_OPT_TCP_BINDTODEVICE,"wlan0"))!=0){
                 fatal("nng_dialer_setopt_string", rv);
         }
-        if((rv=nng_dialer_start(tmpd,NNG_FLAG_NONBLOCK))!=0){
+        if((rv=nng_dialer_start(tmpd,0))!=0){
                 fatal("nng_dialer_start", rv);
         }
         char* check_devicename;

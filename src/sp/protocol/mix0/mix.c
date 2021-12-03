@@ -13,13 +13,8 @@
 #include "core/nng_impl.h"
 #include "nng/protocol/mix/mix.h"
 
-// Pair1 mixamorous mode.  The PAIRv1 protocol is normally a simple 1:1
-// messaging pattern, but this mode offers the ability to use a best-effort
-// multicast type of communication.  There are limitations however.
-// Most notably this does not interact well with nng_device type
-// proxies, and there is no support for raw mode.
-
-// THIS FEATURE IS DEPRECATED.  We discourage use in new applications.
+// Mix protocol provides the ability to deal with multi-interfaces scenario.
+// Mix is like pair1_poly.
 
 #ifdef NNG_ENABLE_STATS
 #define BUMP_STAT(x) nni_stat_inc(x, 1)
@@ -37,17 +32,21 @@ static void mix_pipe_get_cb(void *);
 static void mix_pipe_put_cb(void *);
 static void mix_pipe_fini(void *);
 
+//policy related
+typedef nni_atomic_int recv_status;
+
 // mix_sock is our per-socket protocol private structure.
 struct mix_sock {
+	nni_sock      *sock;
 	nni_msgq *     uwq;
 	nni_msgq *     urq;
-	nni_sock *     sock;
-	nni_atomic_int ttl;
 	nni_mtx        mtx;
 	nni_id_map     pipes;
-	nni_list       plist;
 	bool           started;
 	nni_aio        aio_get;
+
+	//policy related
+	recv_status    recv_level;
 #ifdef NNG_ENABLE_STATS
 	nni_stat_item  stat_mix;
 	nni_stat_item  stat_raw;
@@ -62,9 +61,10 @@ struct mix_sock {
 
 // mix_pipe is our per-pipe protocol private structure.
 struct mix_pipe {
-	nni_pipe *      pipe;
-	mix_sock *pair;
-	nni_msgq *      send_queue;
+	nni_pipe       *pipe;
+	mix_sock       *pair;
+	nni_msgq       *send_queue;
+	nni_msgq       *recv_queue;
 	nni_aio         aio_send;
 	nni_aio         aio_recv;
 	nni_aio         aio_get;
@@ -84,7 +84,7 @@ mix_sock_fini(void *arg)
 
 #ifdef NNG_ENABLE_STATS
 static void
-pair1_add_sock_stat(
+mix_add_sock_stat(
     mix_sock *s, nni_stat_item *item, const nni_stat_info *info)
 {
 	nni_stat_init(item, info);
@@ -158,14 +158,14 @@ mix_sock_init(void *arg, nni_sock *sock)
 		.si_atomic = true,
 	};
 
-	pair1_add_sock_stat(s, &s->stat_mix, &mix_info);
-	pair1_add_sock_stat(s, &s->stat_raw, &raw_info);
-	pair1_add_sock_stat(s, &s->stat_reject_mismatch, &mismatch_info);
-	pair1_add_sock_stat(s, &s->stat_reject_already, &already_info);
-	pair1_add_sock_stat(s, &s->stat_ttl_drop, &ttl_drop_info);
-	pair1_add_sock_stat(s, &s->stat_tx_drop, &tx_drop_info);
-	pair1_add_sock_stat(s, &s->stat_rx_malformed, &rx_malformed_info);
-	pair1_add_sock_stat(s, &s->stat_tx_malformed, &tx_malformed_info);
+	mix_add_sock_stat(s, &s->stat_mix, &mix_info);
+	mix_add_sock_stat(s, &s->stat_raw, &raw_info);
+	mix_add_sock_stat(s, &s->stat_reject_mismatch, &mismatch_info);
+	mix_add_sock_stat(s, &s->stat_reject_already, &already_info);
+	mix_add_sock_stat(s, &s->stat_ttl_drop, &ttl_drop_info);
+	mix_add_sock_stat(s, &s->stat_tx_drop, &tx_drop_info);
+	mix_add_sock_stat(s, &s->stat_rx_malformed, &rx_malformed_info);
+	mix_add_sock_stat(s, &s->stat_tx_malformed, &tx_malformed_info);
 
 	nni_stat_set_bool(&s->stat_raw, false);
 	nni_stat_set_bool(&s->stat_mix, true);
@@ -233,7 +233,7 @@ mix_pipe_start(void *arg)
 	int             rv;
 
 	nni_mtx_lock(&s->mtx);
-	if (nni_pipe_peer(p->pipe) != NNG_PAIR1_PEER) {
+	if (nni_pipe_peer(p->pipe) != NNG_MIX_PEER) {
 		nni_mtx_unlock(&s->mtx);
 		BUMP_STAT(&s->stat_reject_mismatch);
 		// Peer protocol mismatch.
@@ -500,6 +500,16 @@ static nni_option mix_sock_options[] = {
 	    .o_get  = mix_get_max_ttl,
 	    .o_set  = mix_set_max_ttl,
 	},
+	{
+	    .o_name = NNG_OPT_MAXTTL,
+	    .o_get  = mix_get_max_ttl,
+	    .o_set  = mix_set_max_ttl,
+	},
+	{
+	    .o_name = NNG_OPT_MAXTTL,
+	    .o_get  = mix_get_max_ttl,
+	    .o_set  = mix_set_max_ttl,
+	},
 	// terminate list
 	{
 	    .o_name = NULL,
@@ -519,15 +529,15 @@ static nni_proto_sock_ops mix_sock_ops = {
 
 static nni_proto mix_proto = {
 	.proto_version  = NNI_PROTOCOL_VERSION,
-	.proto_self     = { NNG_PAIR1_SELF, NNG_PAIR1_SELF_NAME },
-	.proto_peer     = { NNG_PAIR1_PEER, NNG_PAIR1_PEER_NAME },
+	.proto_self     = { NNG_MIX_SELF, NNG_MIX_SELF_NAME },
+	.proto_peer     = { NNG_MIX_PEER, NNG_MIX_PEER_NAME },
 	.proto_flags    = NNI_PROTO_FLAG_SNDRCV,
 	.proto_sock_ops = &mix_sock_ops,
 	.proto_pipe_ops = &mix_pipe_ops,
 };
 
 int
-nng_pair1_open_mix(nng_socket *sock)
+nng_mix_open(nng_socket *sock)
 {
 	return (nni_proto_open(sock, &mix_proto));
 }
