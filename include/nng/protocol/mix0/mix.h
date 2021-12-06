@@ -17,10 +17,6 @@ extern "C" {
 
 NNG_DECL int nng_mix_open(nng_socket *);
 
-#ifndef nng_mix_open
-#define nng_mix_open nng_mix_open
-#endif
-
 #define NNG_MIX_SELF 0x80
 #define NNG_MIX_PEER 0x80
 #define NNG_MIX_SELF_NAME "mix"

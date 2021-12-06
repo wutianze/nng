@@ -491,6 +491,42 @@ nni_dialer_setopt(
 		nni_mtx_unlock(&d->d_mtx);
 		return (rv);
 	}
+	if (strcmp(name, NNG_OPT_INTERFACE_DELAY) == 0) {
+		int rv;
+		nni_mtx_lock(&d->d_mtx);
+		rv = nni_copyin_int(&(d->d_nature.delay), val, sz, t);
+		nni_mtx_unlock(&d->d_mtx);
+		return (rv);
+	}
+	if (strcmp(name, NNG_OPT_INTERFACE_DELAY) == 0) {
+		int rv;
+		nni_mtx_lock(&d->d_mtx);
+		rv = nni_copyin_int(&(d->d_nature.delay), val, sz, t);
+		nni_mtx_unlock(&d->d_mtx);
+		return (rv);
+	}
+	if (strcmp(name, NNG_OPT_INTERFACE_BW) == 0) {
+		int rv;
+		nni_mtx_lock(&d->d_mtx);
+		rv = nni_copyin_int(&(d->d_nature.bw), val, sz, t);
+		nni_mtx_unlock(&d->d_mtx);
+		return (rv);
+	}
+	if (strcmp(name, NNG_OPT_INTERFACE_RELIABLE) == 0) {
+		int rv;
+		nni_mtx_lock(&d->d_mtx);
+		rv = nni_copyin_int(&(d->d_nature.reliable), val, sz, t);
+		nni_mtx_unlock(&d->d_mtx);
+		return (rv);
+	}
+	if (strcmp(name, NNG_OPT_INTERFACE_SAFE) == 0) {
+		int rv;
+		nni_mtx_lock(&d->d_mtx);
+		rv = nni_copyin_int(&(d->d_nature.safe), val, sz, t);
+		nni_mtx_unlock(&d->d_mtx);
+		return (rv);
+	}
+
 
 	if (d->d_ops.d_setopt != NULL) {
 		int rv = d->d_ops.d_setopt(d->d_data, name, val, sz, t);
@@ -530,6 +566,34 @@ nni_dialer_getopt(
 		int rv;
 		nni_mtx_lock(&d->d_mtx);
 		rv = nni_copyout_ms(d->d_inirtime, valp, szp, t);
+		nni_mtx_unlock(&d->d_mtx);
+		return (rv);
+	}
+	if (strcmp(name, NNG_OPT_INTERFACE_DELAY) == 0) {
+		int rv;
+		nni_mtx_lock(&d->d_mtx);
+		rv = nni_copyout_int(d->d_nature.delay, valp, szp, t);
+		nni_mtx_unlock(&d->d_mtx);
+		return (rv);
+	}
+	if (strcmp(name, NNG_OPT_INTERFACE_BW) == 0) {
+		int rv;
+		nni_mtx_lock(&d->d_mtx);
+		rv = nni_copyout_int(d->d_nature.bw, valp, szp, t);
+		nni_mtx_unlock(&d->d_mtx);
+		return (rv);
+	}
+	if (strcmp(name, NNG_OPT_INTERFACE_RELIABLE) == 0) {
+		int rv;
+		nni_mtx_lock(&d->d_mtx);
+		rv = nni_copyout_int(d->d_nature.reliable, valp, szp, t);
+		nni_mtx_unlock(&d->d_mtx);
+		return (rv);
+	}
+	if (strcmp(name, NNG_OPT_INTERFACE_SAFE) == 0) {
+		int rv;
+		nni_mtx_lock(&d->d_mtx);
+		rv = nni_copyout_int(d->d_nature.safe, valp, szp, t);
 		nni_mtx_unlock(&d->d_mtx);
 		return (rv);
 	}

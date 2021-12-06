@@ -33,26 +33,39 @@ static void mix_pipe_put_cb(void *);
 static void mix_pipe_fini(void *);
 
 //policy related
-typedef nni_atomic_int recv_status;
+struct mix_send_policy_ops{
+	int (*choose_and_send)(mix_sock*, nni_msg*);
+};
+struct mix_recv_policy_ops{
+	int (*recv_and_choose)(mix_sock*, nni_msg*);
+};
+
+typedef struct mix_send_policy_ops mix_send_policy_ops;
+typedef struct mix_recv_policy_ops mix_recv_policy_ops;
 
 // mix_sock is our per-socket protocol private structure.
 struct mix_sock {
 	nni_sock      *sock;
-	nni_msgq *     uwq;
-	nni_msgq *     urq;
+	nni_msgq      *uwq;
+	nni_msgq      *urq_urgent;
+	nni_msgq      *urq_normal;
+	nni_msgq      *urq_unimportant;
 	nni_mtx        mtx;
 	nni_id_map     pipes;
+	nni_list       delay_list;
+	nni_list       bw_list;
+	nni_list       reliable_list;
+	nni_list       safe_list;
 	bool           started;
 	nni_aio        aio_get;
 
 	//policy related
-	recv_status    recv_level;
+	int            recv_policy;
+	int            send_policy;
 #ifdef NNG_ENABLE_STATS
 	nni_stat_item  stat_mix;
-	nni_stat_item  stat_raw;
 	nni_stat_item  stat_reject_mismatch;
 	nni_stat_item  stat_reject_already;
-	nni_stat_item  stat_ttl_drop;
 	nni_stat_item  stat_rx_malformed;
 	nni_stat_item  stat_tx_malformed;
 	nni_stat_item  stat_tx_drop;
@@ -64,12 +77,14 @@ struct mix_pipe {
 	nni_pipe       *pipe;
 	mix_sock       *pair;
 	nni_msgq       *send_queue;
-	nni_msgq       *recv_queue;
 	nni_aio         aio_send;
 	nni_aio         aio_recv;
 	nni_aio         aio_get;
 	nni_aio         aio_put;
-	nni_list_node   node;
+	nni_list_node   node_delay;
+	nni_list_node   node_bw;
+	nni_list_node   node_reliable;
+	nni_list_node   node_safe;
 };
 
 static void
@@ -98,7 +113,10 @@ mix_sock_init(void *arg, nni_sock *sock)
 	mix_sock *s = arg;
 
 	nni_id_map_init(&s->pipes, 0, 0, false);
-	NNI_LIST_INIT(&s->plist, mix_pipe, node);
+	NNI_LIST_INIT(&s->delay_list, mix_pipe, node_delay);
+	NNI_LIST_INIT(&s->bw_list, mix_pipe, node_bw);
+	NNI_LIST_INIT(&s->reliable_list, mix_pipe, node_reliable);
+	NNI_LIST_INIT(&s->safe_list, mix_pipe, node_safe);
 	s->sock = sock;
 
 	// Raw mode uses this.
@@ -112,11 +130,6 @@ mix_sock_init(void *arg, nni_sock *sock)
 		.si_desc = "mixamorous mode?",
 		.si_type = NNG_STAT_BOOLEAN,
 	};
-	static const nni_stat_info raw_info = {
-		.si_name = "raw",
-		.si_desc = "raw mode?",
-		.si_type = NNG_STAT_BOOLEAN,
-	};
 	static const nni_stat_info mismatch_info = {
 		.si_name   = "mismatch",
 		.si_desc   = "pipes rejected (protocol mismatch)",
@@ -127,13 +140,6 @@ mix_sock_init(void *arg, nni_sock *sock)
 		.si_name   = "already",
 		.si_desc   = "pipes rejected (already connected)",
 		.si_type   = NNG_STAT_COUNTER,
-		.si_atomic = true,
-	};
-	static const nni_stat_info ttl_drop_info = {
-		.si_name   = "ttl_drop",
-		.si_desc   = "messages dropped due to too many hops",
-		.si_type   = NNG_STAT_COUNTER,
-		.si_unit   = NNG_UNIT_MESSAGES,
 		.si_atomic = true,
 	};
 	static const nni_stat_info tx_drop_info = {
@@ -159,22 +165,23 @@ mix_sock_init(void *arg, nni_sock *sock)
 	};
 
 	mix_add_sock_stat(s, &s->stat_mix, &mix_info);
-	mix_add_sock_stat(s, &s->stat_raw, &raw_info);
 	mix_add_sock_stat(s, &s->stat_reject_mismatch, &mismatch_info);
 	mix_add_sock_stat(s, &s->stat_reject_already, &already_info);
-	mix_add_sock_stat(s, &s->stat_ttl_drop, &ttl_drop_info);
 	mix_add_sock_stat(s, &s->stat_tx_drop, &tx_drop_info);
 	mix_add_sock_stat(s, &s->stat_rx_malformed, &rx_malformed_info);
 	mix_add_sock_stat(s, &s->stat_tx_malformed, &tx_malformed_info);
 
-	nni_stat_set_bool(&s->stat_raw, false);
 	nni_stat_set_bool(&s->stat_mix, true);
 #endif
 
+	int rv;
 	s->uwq = nni_sock_sendq(sock);
-	s->urq = nni_sock_recvq(sock);
-	nni_atomic_init(&s->ttl);
-	nni_atomic_set(&s->ttl, 8);
+	if(((rv = nni_msgq_init(&s->urq_urgent,2)) != 0) || 
+	((rv = nni_msgq_init(&s->urq_normal,2)) != 0) ||
+	((rv = nni_msgq_init(&s->urq_unimportant,2)) != 0)
+	){
+		return rv;
+	}
 
 	return (0);
 }
@@ -441,31 +448,33 @@ mix_sock_close(void *arg)
 }
 
 static int
-mix_set_max_ttl(void *arg, const void *buf, size_t sz, nni_opt_type t)
+mix_set_send_policy(void *arg, const void *buf, size_t sz, nni_opt_type t)
 {
 	mix_sock *s = arg;
-	int             rv;
-	int             ttl;
 
-	if ((rv = nni_copyin_int(&ttl, buf, sz, 1, NNI_MAX_MAX_TTL, t)) == 0) {
-		nni_atomic_set(&s->ttl, ttl);
-	}
-
-	return (rv);
+	return (nni_copyin_int(&s->send_policy, buf, sz, -1, NNI_SENDPOLICY_DEFAULT, t));
 }
 
 static int
-mix_get_max_ttl(void *arg, void *buf, size_t *szp, nni_opt_type t)
+mix_get_send_policy(void *arg, void *buf, size_t *szp, nni_opt_type t)
 {
 	mix_sock *s = arg;
-	return (nni_copyout_int(nni_atomic_get(&s->ttl), buf, szp, t));
+	return (nni_copyout_int(s->send_policy, buf, szp, t));
 }
 
 static int
-mix_get_mix(void *arg, void *buf, size_t *szp, nni_opt_type t)
+mix_set_recv_policy(void *arg, const void *buf, size_t sz, nni_opt_type t)
 {
-	NNI_ARG_UNUSED(arg);
-	return (nni_copyout_bool(true, buf, szp, t));
+	mix_sock *s = arg;
+
+	return (nni_copyin_int(&s->recv_policy, buf, sz, -1, NNI_RECVPOLICY_UNIMPORTANT, t));
+}
+
+static int
+mix_get_recv_policy(void *arg, void *buf, size_t *szp, nni_opt_type t)
+{
+	mix_sock *s = arg;
+	return (nni_copyout_int(s->recv_policy, buf, szp, t));
 }
 
 static void
@@ -496,19 +505,14 @@ static nni_proto_pipe_ops mix_pipe_ops = {
 
 static nni_option mix_sock_options[] = {
 	{
-	    .o_name = NNG_OPT_MAXTTL,
-	    .o_get  = mix_get_max_ttl,
-	    .o_set  = mix_set_max_ttl,
+	    .o_name = NNG_OPT_SENDPOLICY,
+	    .o_get  = mix_get_send_policy,
+	    .o_set  = mix_set_send_policy,
 	},
 	{
-	    .o_name = NNG_OPT_MAXTTL,
-	    .o_get  = mix_get_max_ttl,
-	    .o_set  = mix_set_max_ttl,
-	},
-	{
-	    .o_name = NNG_OPT_MAXTTL,
-	    .o_get  = mix_get_max_ttl,
-	    .o_set  = mix_set_max_ttl,
+	    .o_name = NNG_OPT_RECVPOLICY,
+	    .o_get  = mix_get_recv_policy,
+	    .o_set  = mix_set_recv_policy,
 	},
 	// terminate list
 	{

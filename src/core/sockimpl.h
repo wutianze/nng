@@ -37,6 +37,14 @@ struct nni_dialer {
 	nni_duration      d_currtime; // current time for reconnect
 	nni_duration      d_inirtime; // initial time for reconnect
 	nni_reap_node     d_reap;
+	
+	// used by mix protocol
+	struct{
+		int delay;
+		int bw;
+		int reliable;
+		int safe;
+	}d_nature;
 
 #ifdef NNG_ENABLE_STATS
 	nni_stat_item st_root;
