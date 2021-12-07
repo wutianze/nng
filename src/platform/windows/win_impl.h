@@ -1,5 +1,5 @@
 //
-// Copyright 2018 Staysail Systems, Inc. <info@staysail.tech>
+// Copyright 2021 Staysail Systems, Inc. <info@staysail.tech>
 // Copyright 2018 Capitar IT Group BV <info@capitar.com>
 //
 // This software is supplied under the terms of the MIT License, a
@@ -37,19 +37,23 @@ struct nni_plat_thr {
 
 struct nni_plat_mtx {
 	SRWLOCK srl;
-	DWORD   owner;
-	int     init;
 };
+
+#define NNI_MTX_INITIALIZER { SRWLOCK_INIT }
 
 struct nni_rwlock {
 	SRWLOCK rwl;
 	BOOLEAN exclusive;
 };
 
+#define NNI_RWLOCK_INITIALIZER { SRWLOCK_INIT }
+
 struct nni_plat_cv {
 	CONDITION_VARIABLE cv;
 	PSRWLOCK           srl;
 };
+
+#define NNI_CV_INITIALIZER(mxp) { .srl = mxp, .cv = CONDITION_VARIABLE_INIT }
 
 struct nni_atomic_flag {
 	unsigned f;
@@ -64,6 +68,10 @@ struct nni_atomic_int {
 };
 
 struct nni_atomic_u64 {
+	LONGLONG v;
+};
+
+struct nni_atomic_ptr {
 	LONGLONG v;
 };
 
