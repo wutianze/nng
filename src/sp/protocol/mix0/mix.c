@@ -8,10 +8,31 @@
 // found online at https://opensource.org/licenses/MIT.
 //
 
+// now we do not support windows platform in mix
+//#ifndef _WIN32
+
 #include <stdlib.h>
 
 #include "core/nng_impl.h"
 #include "nng/protocol/mix/mix.h"
+
+//for posix
+#include <fcntl.h>
+#include <poll.h>
+bool poll_fd(int fd){
+	struct pollfd pfd;
+	pfd.fd      = fd;
+	pfd.events  = POLLRDNORM;
+	pfd.revents = 0;
+
+	switch (poll(&pfd, 1, 0)) {
+	case 0:
+		return (false);
+	case 1:
+		return (true);
+	}
+	return false;
+}
 
 // Mix protocol provides the ability to deal with multi-interfaces scenario.
 // Mix is like pair1_poly.
@@ -50,7 +71,15 @@ struct mix_sock {
 	nni_msgq      *urq_urgent;
 	nni_msgq      *urq_normal;
 	nni_msgq      *urq_unimportant;
-	nni_mtx        mtx;
+	/* replaced by adding tryget in msgqueue.c
+	int            fd_urgent;
+	int            fd_normal;
+	int            fd_unimportant;
+	*/
+
+	// mtx is to protect id_map and list for pipes
+	// for pipe close&start will make changes to them
+	nni_mtx        mtx;	
 	nni_id_map     pipes;
 	nni_list       delay_list;
 	nni_list       bw_list;
@@ -197,11 +226,34 @@ mix_sock_init(void *arg, nni_sock *sock)
 	s->uwq = nni_sock_sendq(sock);
 	if(((rv = nni_msgq_init(&s->urq_urgent,2)) != 0) || 
 	((rv = nni_msgq_init(&s->urq_normal,2)) != 0) ||
-	((rv = nni_msgq_init(&s->urq_unimportant,2)) != 0)
+	((rv = nni_msgq_init(&s->urq_unimportant,4)) != 0)
 	){
 		return rv;
 	}
-
+	
+	/*
+	nni_pollable *p;
+	if ((rv = nni_msgq_get_recvable(s->urq_urgent,&p)) != 0){
+		return rv;
+	}else{
+		if ((rv = nni_pollable_getfd(p,&s->fd_urgent)) != 0){
+			return rv;
+		}
+	}
+	if ((rv = nni_msgq_get_recvable(s->urq_normal,&p)) != 0){
+		return rv;
+	}else{
+		if ((rv = nni_pollable_getfd(p,&s->fd_normal)) != 0){
+			return rv;
+		}
+	}
+	if ((rv = nni_msgq_get_recvable(s->urq_unimportant,&p)) != 0){
+		return rv;
+	}else{
+		if ((rv = nni_pollable_getfd(p,&s->fd_unimportant)) != 0){
+			return rv;
+		}
+	}*/
 	return (0);
 }
 
@@ -239,10 +291,20 @@ mix_pipe_init(void *arg, nni_pipe *pipe, void *pair)
 	nni_aio_init(&p->aio_get, mix_pipe_get_cb, p);
 	nni_aio_init(&p->aio_put, mix_pipe_put_cb, p);
 
-	if ((rv = nni_msgq_init(&p->send_queue, 2)) != 0) {
+	if ((rv = nni_msgq_init(&p->send_queue, 1)) != 0) {
 		mix_pipe_fini(p);
 		return (rv);
 	}
+
+	/*
+	nni_pollable* tmp;
+	if ((rv = nni_msgq_get_sendable(p->send_queue,&tmp)) != 0){
+		return rv;
+	}else{
+		if ((rv = nni_pollable_getfd(tmp,&p->fd_sendable)) != 0){
+			return rv;
+		}
+	}*/
 
 	p->pipe = pipe;
 	p->pair = pair;
@@ -251,16 +313,16 @@ mix_pipe_init(void *arg, nni_pipe *pipe, void *pair)
 }
 
 static int
-insert_in_pipe_list(mix_pipe*new_pipe, nni_list*list_pipe, const char*which){
+insert_in_pipe_list(nni_list*list_pipe, mix_pipe*new_pipe, const char*which){
 	int rv = 0;
 	mix_pipe*exist_pipe;
 	int new_val = 0;
-	if((rv = nni_pipe_getopt(new_pipe->pipe, which,&new_val,NULL,NNI_TYPE_UINT32))!=0){
+	if((rv = nni_pipe_getopt(new_pipe->pipe, which,&new_val,NULL,NNI_TYPE_INT32))!=0){
 		return rv;
 	}
 	NNI_LIST_FOREACH(list_pipe,exist_pipe){
 		int old_val = 0;
-		if((rv = nni_pipe_getopt(exist_pipe->pipe, which,&old_val,NULL,NNI_TYPE_UINT32))!=0){
+		if((rv = nni_pipe_getopt(exist_pipe->pipe, which,&old_val,NULL,NNI_TYPE_INT32))!=0){
 			return rv;
 		}
 		if(old_val <= new_val){// new_pipe is better
@@ -268,6 +330,8 @@ insert_in_pipe_list(mix_pipe*new_pipe, nni_list*list_pipe, const char*which){
 			return 0;
 		}
 	}
+	nni_list_append(list_pipe,new_pipe);
+	return 0;
 }
 
 static int
@@ -286,15 +350,32 @@ mix_pipe_start(void *arg)
 		return (NNG_EPROTO);
 	}
 
+	// add the new pipe in sock
 	id = nni_pipe_id(p->pipe);
 	if ((rv = nni_id_set(&s->pipes, id, p)) != 0) {
 		nni_mtx_unlock(&s->mtx);
 		return (rv);
 	}
+	if ((rv = insert_in_pipe_list(&s->delay_list,p,NNG_OPT_INTERFACE_DELAY))!=0){
+		nni_mtx_unlock(&s->mtx);
+		return rv;
+	}
+	if ((rv = insert_in_pipe_list(&s->bw_list,p,NNG_OPT_INTERFACE_BW))!=0){
+		nni_mtx_unlock(&s->mtx);
+		return rv;
+	}
+	if ((rv = insert_in_pipe_list(&s->reliable_list,p,NNG_OPT_INTERFACE_RELIABLE))!=0){
+		nni_mtx_unlock(&s->mtx);
+		return rv;
+	}
+	if ((rv = insert_in_pipe_list(&s->safe_list,p,NNG_OPT_INTERFACE_SAFE))!=0){
+		nni_mtx_unlock(&s->mtx);
+		return rv;
+	}
+
 	if (!s->started) {
 		nni_msgq_aio_get(s->uwq, &s->aio_get);
 	}
-	nni_list_append(&s->plist, p);
 	s->started = true;
 	nni_mtx_unlock(&s->mtx);
 
@@ -323,7 +404,10 @@ mix_pipe_close(void *arg)
 
 	nni_mtx_lock(&s->mtx);
 	nni_id_remove(&s->pipes, nni_pipe_id(p->pipe));
-	nni_list_node_remove(&p->node);
+	nni_list_node_remove(&p->node_delay);
+	nni_list_node_remove(&p->node_bw);
+	nni_list_node_remove(&p->node_reliable);
+	nni_list_node_remove(&p->node_safe);
 	nni_mtx_unlock(&s->mtx);
 
 	nni_msgq_close(p->send_queue);
@@ -385,7 +469,6 @@ mix_sock_get_cb(void *arg)
 	mix_pipe *p;
 	mix_sock *s = arg;
 	nni_msg *       msg;
-	uint32_t        id;
 
 	if (nni_aio_result(&s->aio_get) != 0) {
 		// Socket closing...
@@ -396,6 +479,24 @@ mix_sock_get_cb(void *arg)
 	nni_aio_set_msg(&s->aio_get, NULL);
 
 	p = NULL;
+	id = nni_msg_get_pipe(msg); 
+
+	// need mtx?
+	switch(s->send_policy){
+case NNI_SENDPOLICY_RAW:
+	uint32_t        id;
+	if(id != 0){
+		p = nni_id_get(&s->pipes,id);
+	}else{
+
+	}
+break;
+case NNI_SENDPOLICY_SAMPLE:
+break;
+case NNI_SENDPOLICY_DEFAULT:
+default:
+
+	}
 	nni_mtx_lock(&s->mtx);
 	// If no pipe was requested, we look for any connected peer.
 	if (((id = nni_msg_get_pipe(msg)) == 0) &&
@@ -473,7 +574,22 @@ mix_pipe_send_cb(void *arg)
 	nni_msgq_aio_get(p->send_queue, &p->aio_get);
 }
 
+static void
+mix_sock_send(void *arg, nni_aio *aio)
+{
+	mix_sock *s = arg;
 
+	nni_sock_bump_tx(s->sock, nni_msg_len(nni_aio_get_msg(aio)));
+	nni_msgq_aio_put(s->uwq, aio);
+}
+
+static void
+mix_sock_recv(void *arg, nni_aio *aio)
+{
+	mix_sock *s = arg;
+
+	nni_msgq_aio_get(s->urq, aio);
+}
 
 static int
 mix_set_send_policy(void *arg, const void *buf, size_t sz, nni_opt_type t)
@@ -505,23 +621,6 @@ mix_get_recv_policy(void *arg, void *buf, size_t *szp, nni_opt_type t)
 	return (nni_copyout_int(s->recv_policy, buf, szp, t));
 }
 
-static void
-mix_sock_send(void *arg, nni_aio *aio)
-{
-	mix_sock *s = arg;
-
-	nni_sock_bump_tx(s->sock, nni_msg_len(nni_aio_get_msg(aio)));
-	nni_msgq_aio_put(s->uwq, aio);
-}
-
-static void
-mix_sock_recv(void *arg, nni_aio *aio)
-{
-	mix_sock *s = arg;
-
-	nni_msgq_aio_get(s->urq, aio);
-}
-
 static nni_proto_pipe_ops mix_pipe_ops = {
 	.pipe_size  = sizeof(mix_pipe),
 	.pipe_init  = mix_pipe_init,
@@ -533,12 +632,12 @@ static nni_proto_pipe_ops mix_pipe_ops = {
 
 static nni_option mix_sock_options[] = {
 	{
-	    .o_name = NNG_OPT_SENDPOLICY,
+	    .o_name = NNG_OPT_MIX_SENDPOLICY,
 	    .o_get  = mix_get_send_policy,
 	    .o_set  = mix_set_send_policy,
 	},
 	{
-	    .o_name = NNG_OPT_RECVPOLICY,
+	    .o_name = NNG_OPT_MIX_RECVPOLICY,
 	    .o_get  = mix_get_recv_policy,
 	    .o_set  = mix_set_recv_policy,
 	},
@@ -573,3 +672,4 @@ nng_mix_open(nng_socket *sock)
 {
 	return (nni_proto_open(sock, &mix_proto));
 }
+//#endif

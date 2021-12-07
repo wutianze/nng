@@ -177,7 +177,7 @@ typedef enum{
 	NNI_SENDPOLICY_SAMPLE, //sampling the msg and the sampled msg has high priority
 	NNI_SENDPOLICY_DEFAULT, // sock decides which interface to use based on the msg's properties
 }mix_send_policy;
-// recv_level defined in protocol mix
+// recv_policy defined in protocol mix
 typedef enum{
 	NNI_RECVPOLICY_URGENT, 
 	NNI_RECVPOLICY_NORMAL, 
