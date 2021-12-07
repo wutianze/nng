@@ -32,7 +32,7 @@ static void mix_pipe_get_cb(void *);
 static void mix_pipe_put_cb(void *);
 static void mix_pipe_fini(void *);
 
-//policy related
+/*use func pointer will bring sync overhead
 struct mix_send_policy_ops{
 	int (*choose_and_send)(mix_sock*, nni_msg*);
 };
@@ -42,7 +42,7 @@ struct mix_recv_policy_ops{
 
 typedef struct mix_send_policy_ops mix_send_policy_ops;
 typedef struct mix_recv_policy_ops mix_recv_policy_ops;
-
+*/ 
 // mix_sock is our per-socket protocol private structure.
 struct mix_sock {
 	nni_sock      *sock;
@@ -94,6 +94,9 @@ mix_sock_fini(void *arg)
 
 	nni_aio_fini(&s->aio_get);
 	nni_id_map_fini(&s->pipes);
+	nni_msgq_fini(s->urq_urgent);
+	nni_msgq_fini(s->urq_normal);
+	nni_msgq_fini(s->urq_unimportant);
 	nni_mtx_fini(&s->mtx);
 }
 
@@ -106,6 +109,22 @@ mix_add_sock_stat(
 	nni_sock_add_stat(s->sock, item);
 }
 #endif
+
+static void
+mix_sock_open(void *arg)
+{
+	NNI_ARG_UNUSED(arg);
+}
+
+static void
+mix_sock_close(void *arg)
+{
+	mix_sock *s = arg;
+	nni_aio_close(&s->aio_get);
+	nni_msgq_close(s->urq_urgent);
+	nni_msgq_close(s->urq_normal);
+	nni_msgq_close(s->urq_unimportant);
+}
 
 static int
 mix_sock_init(void *arg, nni_sock *sock)
@@ -229,6 +248,26 @@ mix_pipe_init(void *arg, nni_pipe *pipe, void *pair)
 	p->pair = pair;
 
 	return (0);
+}
+
+static int
+insert_in_pipe_list(mix_pipe*new_pipe, nni_list*list_pipe, const char*which){
+	int rv = 0;
+	mix_pipe*exist_pipe;
+	int new_val = 0;
+	if((rv = nni_pipe_getopt(new_pipe->pipe, which,&new_val,NULL,NNI_TYPE_UINT32))!=0){
+		return rv;
+	}
+	NNI_LIST_FOREACH(list_pipe,exist_pipe){
+		int old_val = 0;
+		if((rv = nni_pipe_getopt(exist_pipe->pipe, which,&old_val,NULL,NNI_TYPE_UINT32))!=0){
+			return rv;
+		}
+		if(old_val <= new_val){// new_pipe is better
+			nni_list_insert_before(list_pipe,new_pipe,exist_pipe);
+			return 0;
+		}
+	}
 }
 
 static int
@@ -434,18 +473,7 @@ mix_pipe_send_cb(void *arg)
 	nni_msgq_aio_get(p->send_queue, &p->aio_get);
 }
 
-static void
-mix_sock_open(void *arg)
-{
-	NNI_ARG_UNUSED(arg);
-}
 
-static void
-mix_sock_close(void *arg)
-{
-	mix_sock *s = arg;
-	nni_aio_close(&s->aio_get);
-}
 
 static int
 mix_set_send_policy(void *arg, const void *buf, size_t sz, nni_opt_type t)

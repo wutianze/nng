@@ -694,6 +694,7 @@ NNG_DECL nng_listener nng_pipe_listener(nng_pipe);
 #define NNG_OPT_RECONNMAXT "reconnect-time-max"
 
 // These options are mostly used in mix protocol(set in nni_dialer), value ranges from 0 to 5
+// For value, bigger is better.
 #define NNG_OPT_INTERFACE_DELAY "interface-delay"
 #define NNG_OPT_INTERFACE_BW "interface-bindwidth"
 #define NNG_OPT_INTERFACE_RELIABLE "interface-reliable"
