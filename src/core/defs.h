@@ -171,17 +171,4 @@ typedef nni_type nni_opt_type;
 #define NNI_EXPIRE_BATCH 100
 #endif
 
-// policy types used in protocol mix
-typedef enum{
-	NNI_SENDPOLICY_RAW, // user decides which interface to use
-	NNI_SENDPOLICY_SAMPLE, //sampling the msg and the sampled msg has high priority
-	NNI_SENDPOLICY_DEFAULT, // sock decides which interface to use based on the msg's properties
-}mix_send_policy;
-// recv_policy defined in protocol mix
-typedef enum{
-	NNI_RECVPOLICY_URGENT, 
-	NNI_RECVPOLICY_NORMAL, 
-	NNI_RECVPOLICY_UNIMPORTANT,
-}mix_recv_policy;
-
 #endif // CORE_DEFS_H

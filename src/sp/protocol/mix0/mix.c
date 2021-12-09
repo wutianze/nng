@@ -16,7 +16,7 @@
 #include "core/nng_impl.h"
 #include "nng/protocol/mix/mix.h"
 
-//for posix
+/*for posix
 #include <fcntl.h>
 #include <poll.h>
 bool poll_fd(int fd){
@@ -32,7 +32,7 @@ bool poll_fd(int fd){
 		return (true);
 	}
 	return false;
-}
+}*/
 
 // Mix protocol provides the ability to deal with multi-interfaces scenario.
 // Mix is like pair1_poly.
@@ -435,38 +435,80 @@ mix_pipe_recv_cb(void *arg)
 	nni_msg_set_pipe(msg, nni_pipe_id(p->pipe));
 
 	// If the message is missing the hop count header, scrap it.
-	if ((nni_msg_len(msg) < sizeof(uint32_t)) ||
-	    ((hdr = nni_msg_trim_u32(msg)) > 0xff)) {
+	if (nni_msg_len(msg) < sizeof(uint16_t)) {
 		BUMP_STAT(&s->stat_rx_malformed);
 		nni_msg_free(msg);
 		nni_pipe_close(pipe);
 		return;
 	}
-
-	len = nni_msg_len(msg);
-
-	// If we bounced too many times, discard the message, but
-	// keep getting more.
-	if ((int) hdr > nni_atomic_get(&s->ttl)) {
-		BUMP_STAT(&s->stat_ttl_drop);
-		nni_msg_free(msg);
-		nni_pipe_recv(pipe, &p->aio_recv);
-		return;
+	uint8_t urgency_level = nni_msg_trim_u8(msg);
+	uint8_t send_policy_code = nni_msg_trim_u8(msg);
+	switch(send_policy_code){
+		case NNI_SENDPOLICY_RAW:{
+			nni_msg_header_append_u8(msg,urgency_level);
+			nni_msg_header_append_u8(msg,send_policy_code);
+			break;
+		}
+		case NNI_SENDPOLICY_SAMPLE:{
+			break;
+		}
+		case NNI_SENDPOLICY_DEFAULT:{
+			break;
+		}
+		//different from send, here, wrong code means err
+		//and we won't get the following content
+		default:{
+			BUMP_STAT(&s->stat_rx_malformed);
+			nni_msg_free(msg);
+			nni_pipe_close(pipe);
+			return;
+		}
 	}
-
-	// Store the hop count in the header.
-	nni_msg_header_append_u32(msg, hdr);
+	len = nni_msg_len(msg);
 
 	// Send the message up.
 	nni_aio_set_msg(&p->aio_put, msg);
 	nni_sock_bump_rx(s->sock, len);
+	switch(urgency_level){
+
+	}
 	nni_msgq_aio_put(s->urq, &p->aio_put);
+}
+
+static int
+tryput_in_pipe_list(nni_list*list_pipe, nni_msg*msg){
+	int rv = 0;
+	mix_pipe*exist_pipe;
+	NNI_LIST_FOREACH(list_pipe,exist_pipe){
+		if(nni_msgq_tryput(exist_pipe->send_queue,msg)==0){
+			return 0;
+		}
+	}
+	return NNG_EAGAIN;
+}
+
+static void
+choose_nature_list(uint8_t nature, mix_sock*s,nni_list*chosen_list){
+	switch(nature){
+			case NNG_INTERFACE_RAW_MSG_DELAY:
+			chosen_list = &s->delay_list;
+			break;
+			case NNG_INTERFACE_RAW_MSG_BW:
+			chosen_list = &s->bw_list;
+			break;
+			case NNG_INTERFACE_RAW_MSG_RELIABLE:
+			chosen_list = &s->reliable_list;
+			break;
+			//Other msgs use the safest pipe
+			default:	
+			chosen_list = &s->safe_list;
+	}
+	return;
 }
 
 static void
 mix_sock_get_cb(void *arg)
 {
-	mix_pipe *p;
 	mix_sock *s = arg;
 	nni_msg *       msg;
 
@@ -478,45 +520,52 @@ mix_sock_get_cb(void *arg)
 	msg = nni_aio_get_msg(&s->aio_get);
 	nni_aio_set_msg(&s->aio_get, NULL);
 
-	p = NULL;
-	id = nni_msg_get_pipe(msg); 
+	uint32_t id = nni_msg_get_pipe(msg); 
 
-	// need mtx?
 	switch(s->send_policy){
-case NNI_SENDPOLICY_RAW:
-	uint32_t        id;
-	if(id != 0){
-		p = nni_id_get(&s->pipes,id);
-	}else{
-
+	case NNG_SENDPOLICY_RAW:{
+		if(nni_msg_header_len(msg) != sizeof(uint16_t)){
+			BUMP_STAT(&s->stat_tx_malformed);
+			goto send_fail;
+		}
+		uint8_t urgency_level = nni_msg_header_peek_u8(msg);
+		uint8_t nature_chosen = nni_msg_header_chop_u8(msg);
+		if(nni_msg_header_append_u8(msg, NNI_SENDPOLICY_RAW) != 0){// TODO int -> uint8
+			goto send_fail;
+		}
+		if(id != 0){
+			nni_mtx_lock(&s->mtx);
+			mix_pipe *p = nni_id_get(&s->pipes,id);
+			if((p == NULL) || nni_msgq_tryput(p->send_queue,msg) != 0){
+				BUMP_STAT(&s->stat_tx_drop);
+				goto send_fail;
+			}
+		}else{
+			nni_mtx_lock(&s->mtx);
+			nni_list* chosen_list = NULL;
+			choose_nature_list(nature_chosen,s,chosen_list);
+			if(tryput_in_pipe_list(chosen_list,msg) != 0){
+				BUMP_STAT(&s->stat_tx_drop);
+				goto send_fail;
+			}
+		}
+		break;
 	}
-break;
-case NNI_SENDPOLICY_SAMPLE:
-break;
-case NNI_SENDPOLICY_DEFAULT:
-default:
-
+	case NNG_SENDPOLICY_SAMPLE:{
+		break;
 	}
-	nni_mtx_lock(&s->mtx);
-	// If no pipe was requested, we look for any connected peer.
-	if (((id = nni_msg_get_pipe(msg)) == 0) &&
-	    (!nni_list_empty(&s->plist))) {
-		p = nni_list_first(&s->plist);
-	} else {
-		p = nni_id_get(&s->pipes, id);
+	case NNG_SENDPOLICY_DEFAULT:
+	default:{
+		break;
 	}
-
-	// Try a non-blocking send.  If this fails we just discard the
-	// message.  We have to do this to avoid head-of-line blocking
-	// for messages sent to other pipes.  Note that there is some
-	// buffering in the send_queue.
-	if ((p == NULL) || nni_msgq_tryput(p->send_queue, msg) != 0) {
-		BUMP_STAT(&s->stat_tx_drop);
-		nni_msg_free(msg);
 	}
-
 	nni_mtx_unlock(&s->mtx);
 	nni_msgq_aio_get(s->uwq, &s->aio_get);
+	return;
+send_fail:
+	nni_mtx_unlock(&s->mtx);
+	nni_msg_free(msg);
+	return;
 }
 
 static void
@@ -546,14 +595,6 @@ mix_pipe_get_cb(void *arg)
 
 	msg = nni_aio_get_msg(&p->aio_get);
 	nni_aio_set_msg(&p->aio_get, NULL);
-
-	// Cooked mode messages have no header so we have to add one.
-	// Strip off any previously existing header, such as when
-	// replying to messages.
-	nni_msg_header_clear(msg);
-
-	// Insert the hops header.
-	nni_msg_header_append_u32(msg, 1);
 
 	nni_aio_set_msg(&p->aio_send, msg);
 	nni_pipe_send(p->pipe, &p->aio_send);

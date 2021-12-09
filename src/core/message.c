@@ -300,6 +300,16 @@ nni_chunk_trim_u32(nni_chunk *ch)
 	return (v);
 }
 
+static uint8_t
+nni_chunk_trim_u8(nni_chunk *ch)
+{
+	uint8_t v;
+	NNI_ASSERT(ch->ch_len >= sizeof(v));
+	v = *(ch->ch_ptr);
+	nni_chunk_trim(ch, sizeof(v));
+	return (v);
+}
+
 void
 nni_msg_clone(nni_msg *m)
 {
@@ -516,6 +526,12 @@ nni_msg_trim_u32(nni_msg *m)
 	return (nni_chunk_trim_u32(&m->m_body));
 }
 
+uint8_t
+nni_msg_trim_u8(nni_msg *m)
+{
+	return (nni_chunk_trim_u8(&m->m_body));
+}
+
 int
 nni_msg_chop(nni_msg *m, size_t len)
 {
@@ -609,6 +625,70 @@ nni_msg_header_poke_u32(nni_msg *m, uint32_t val)
 	uint8_t *dst;
 	dst = (void *) m->m_header_buf;
 	NNI_PUT32(dst, val);
+}
+
+//trim and chop must check the msg_len first, because the
+//functions dont know if the header has enough len
+uint8_t
+nni_msg_header_trim_u8(nni_msg *m)
+{
+	uint8_t val;
+	uint8_t *dst;
+	dst = (void *) m->m_header_buf;
+	val = *dst;
+	m->m_header_len -= sizeof(val);
+	memmove(m->m_header_buf, &m->m_header_buf[1], m->m_header_len);
+	return (val);
+}
+
+uint8_t
+nni_msg_header_chop_u8(nni_msg *m)
+{
+	uint8_t val;
+	uint8_t *dst;
+	dst = (void *) m->m_header_buf + m->m_header_len;
+	val = *dst;
+	m->m_header_len -= sizeof(val);
+	return (val);
+}
+
+int
+nni_msg_header_insert_u8(nni_msg *m, uint8_t val)
+{
+	if ((sizeof(val) + m->m_header_len) > sizeof(m->m_header_buf)) {
+		return (NNG_EINVAL);
+	}
+	memmove(((uint8_t *) m->m_header_buf) + 1, m->m_header_buf,
+	    m->m_header_len);
+	*((uint8_t*)m->m_header_buf) = val;
+	m->m_header_len += sizeof(val);
+	return (0);
+}
+
+int
+nni_msg_header_append_u8(nni_msg *m, uint8_t val)
+{
+	uint8_t *dst;
+	if ((m->m_header_len + sizeof(val)) >= (sizeof(m->m_header_buf))) {
+		return (NNG_EINVAL);
+	}
+	dst = (void *) m->m_header_buf;
+	dst += m->m_header_len;
+	*dst = val;
+	m->m_header_len += sizeof(val);
+	return 0;
+}
+
+uint8_t
+nni_msg_header_peek_u8(nni_msg *m)
+{
+	return *((uint8_t*)m->m_header_buf);
+}
+
+void
+nni_msg_header_poke_u8(nni_msg *m, uint8_t val)
+{
+	*((uint8_t *) m->m_header_buf) = val;
 }
 
 void

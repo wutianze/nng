@@ -41,6 +41,10 @@ extern void nni_msgq_aio_get(nni_msgq *, nni_aio *);
 // the message queue.
 extern int nni_msgq_tryput(nni_msgq *, nni_msg *);
 
+// nni_msgq_tryget performs a non-blocking attempt to get a message from
+// the message queue.
+extern int nni_msgq_tryget(nni_msgq *, nni_msg *);
+
 // nni_msgq_close closes the queue.  After this all operates on the
 // message queue will return NNG_ECLOSED.  Messages inside the queue
 // are freed.  Unlike closing a go channel, this operation is idempotent.
