@@ -310,6 +310,25 @@ nni_chunk_trim_u8(nni_chunk *ch)
 	return (v);
 }
 
+static uint8_t
+nni_chunk_chop_u8(nni_chunk *ch)
+{
+	uint8_t v;
+	NNI_ASSERT(ch->ch_len >= sizeof(v));
+	v = *(ch->ch_ptr + ch->ch_len - sizeof(v));
+	nni_chunk_chop(ch, sizeof(v));
+	return (v);
+}
+
+static uint8_t
+nni_chunk_peek_u8(nni_chunk *ch)
+{
+	uint8_t v;
+	NNI_ASSERT(ch->ch_len >= sizeof(v));
+	v = *(ch->ch_ptr);
+	return (v);
+}
+
 void
 nni_msg_clone(nni_msg *m)
 {
@@ -538,6 +557,12 @@ nni_msg_chop(nni_msg *m, size_t len)
 	return (nni_chunk_chop(&m->m_body, len));
 }
 
+uint8_t
+nni_msg_chop_u8(nni_msg *m)
+{
+	return (nni_chunk_chop_u8(&m->m_body));
+}
+
 int
 nni_msg_header_append(nni_msg *m, const void *data, size_t len)
 {
@@ -689,6 +714,12 @@ void
 nni_msg_header_poke_u8(nni_msg *m, uint8_t val)
 {
 	*((uint8_t *) m->m_header_buf) = val;
+}
+
+uint8_t
+nni_msg_peek_u8(nni_msg *m)
+{
+	return nni_chunk_peek_u8(&m->m_body);
 }
 
 void

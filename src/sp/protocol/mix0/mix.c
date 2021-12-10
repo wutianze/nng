@@ -226,7 +226,7 @@ mix_sock_init(void *arg, nni_sock *sock)
 	s->uwq = nni_sock_sendq(sock);
 	if(((rv = nni_msgq_init(&s->urq_urgent,2)) != 0) || 
 	((rv = nni_msgq_init(&s->urq_normal,2)) != 0) ||
-	((rv = nni_msgq_init(&s->urq_unimportant,4)) != 0)
+	((rv = nni_msgq_init(&s->urq_unimportant,2)) != 0)
 	){
 		return rv;
 	}
@@ -441,18 +441,19 @@ mix_pipe_recv_cb(void *arg)
 		nni_pipe_close(pipe);
 		return;
 	}
-	uint8_t urgency_level = nni_msg_trim_u8(msg);
-	uint8_t send_policy_code = nni_msg_trim_u8(msg);
+	uint8_t urgency_level = nni_msg_peek_u8(msg);
+	uint8_t send_policy_code = nni_msg_chop_u8(msg);
 	switch(send_policy_code){
-		case NNI_SENDPOLICY_RAW:{
-			nni_msg_header_append_u8(msg,urgency_level);
+		case NNG_SENDPOLICY_RAW:{
 			nni_msg_header_append_u8(msg,send_policy_code);
 			break;
 		}
-		case NNI_SENDPOLICY_SAMPLE:{
+		case NNG_SENDPOLICY_SAMPLE:{
+			//TODO
 			break;
 		}
-		case NNI_SENDPOLICY_DEFAULT:{
+		case NNG_SENDPOLICY_DEFAULT:{
+			//TODO
 			break;
 		}
 		//different from send, here, wrong code means err
@@ -470,9 +471,19 @@ mix_pipe_recv_cb(void *arg)
 	nni_aio_set_msg(&p->aio_put, msg);
 	nni_sock_bump_rx(s->sock, len);
 	switch(urgency_level){
-
+		case NNG_RECVPOLICY_URGENT:{
+			nni_msgq_aio_put(s->urq_urgent, &p->aio_put);
+			break;
+		}
+		case NNG_RECVPOLICY_UNIMPORTANT:{
+			nni_msgq_aio_put(s->urq_unimportant, &p->aio_put);
+			break;
+		}
+		// other msgs are all belong to normal
+		default:{
+			nni_msgq_aio_put(s->urq_normal, &p->aio_put);
+		}
 	}
-	nni_msgq_aio_put(s->urq, &p->aio_put);
 }
 
 static int
@@ -490,13 +501,13 @@ tryput_in_pipe_list(nni_list*list_pipe, nni_msg*msg){
 static void
 choose_nature_list(uint8_t nature, mix_sock*s,nni_list*chosen_list){
 	switch(nature){
-			case NNG_INTERFACE_RAW_MSG_DELAY:
+			case NNG_MSG_INTERFACE_DELAY:
 			chosen_list = &s->delay_list;
 			break;
-			case NNG_INTERFACE_RAW_MSG_BW:
+			case NNG_MSG_INTERFACE_BW:
 			chosen_list = &s->bw_list;
 			break;
-			case NNG_INTERFACE_RAW_MSG_RELIABLE:
+			case NNG_MSG_INTERFACE_RELIABLE:
 			chosen_list = &s->reliable_list;
 			break;
 			//Other msgs use the safest pipe
@@ -530,7 +541,7 @@ mix_sock_get_cb(void *arg)
 		}
 		uint8_t urgency_level = nni_msg_header_peek_u8(msg);
 		uint8_t nature_chosen = nni_msg_header_chop_u8(msg);
-		if(nni_msg_header_append_u8(msg, NNI_SENDPOLICY_RAW) != 0){// TODO int -> uint8
+		if(nni_msg_header_append_u8(msg, NNG_SENDPOLICY_RAW) != 0){// TODO int -> uint8
 			goto send_fail;
 		}
 		if(id != 0){
@@ -628,8 +639,52 @@ static void
 mix_sock_recv(void *arg, nni_aio *aio)
 {
 	mix_sock *s = arg;
+	nni_msg* msg;
+	int rv = nni_msgq_tryget(s->urq_urgent,msg);
+	if(rv == NNG_ECLOSED){
+		//any msgq closed means some error happens
+		nni_aio_finish_error(aio,rv);
+		return;
+	}else if(rv == 0){
+		nni_aio_finish_msg(aio, msg);
+		return;
+	}
 
-	nni_msgq_aio_get(s->urq, aio);
+	rv = nni_msgq_tryget(s->urq_normal,msg);
+	if(rv == NNG_ECLOSED){
+		//any msgq closed means some error happens
+		nni_aio_finish_error(aio,rv);
+		return;
+	}else if(rv == 0){
+		nni_aio_finish_msg(aio, msg);
+		return;
+	}
+	
+	rv = nni_msgq_tryget(s->urq_unimportant,msg);
+	if(rv == NNG_ECLOSED){
+		//any msgq closed means some error happens
+		nni_aio_finish_error(aio,rv);
+		return;
+	}else if(rv == 0){
+		nni_aio_finish_msg(aio, msg);
+		return;
+	}
+
+	//wait in the specified msgq
+	switch(s->recv_policy){
+		case NNG_RECVPOLICY_URGENT:{
+			nni_msgq_aio_get(s->urq_urgent,aio);
+			break;
+		}
+		case NNG_RECVPOLICY_NORMAL:{
+			nni_msgq_aio_get(s->urq_normal,aio);
+			break;
+		}
+		default:{
+			nni_msgq_aio_get(s->urq_unimportant,aio);
+			break;
+		}
+	}
 }
 
 static int

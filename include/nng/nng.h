@@ -702,10 +702,11 @@ NNG_DECL nng_listener nng_pipe_listener(nng_pipe);
 #define NNG_OPT_INTERFACE_RELIABLE "interface-reliable"
 #define NNG_OPT_INTERFACE_SAFE "interface-safe"
 
-#define NNG_INTERFACE_RAW_MSG_DELAY 0
-#define NNG_INTERFACE_RAW_MSG_BW 1
-#define NNG_INTERFACE_RAW_MSG_RELIABLE 2
-#define NNG_INTERFACE_RAW_MSG_SAFE 3
+//used in mix raw mode, carried by msg header
+#define NNG_MSG_INTERFACE_DELAY 0
+#define NNG_MSG_INTERFACE_BW 1
+#define NNG_MSG_INTERFACE_RELIABLE 2
+#define NNG_MSG_INTERFACE_SAFE 3
 
 // policy types used in protocol mix
 #define NNG_SENDPOLICY_RAW 0 // user decides which interface to use
