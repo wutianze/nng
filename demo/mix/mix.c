@@ -21,8 +21,12 @@ send_name(nng_socket sock, char *name)
 {
         int rv;
         printf("%s: SENDING \"%s\"\n", name, name);
-        if ((rv = nng_send(sock, name, strlen(name) + 1, 0)) != 0) {
-                fatal("nng_send", rv);
+        nng_msg* msg;
+        if ((rv = nng_msg_alloc(&msg,0)) != 0) {
+                fatal("nng_msg_alloc", rv);
+        }
+        if ((rv = nng_msg_header_append_u8(msg,NNG_RECVPOLICY_NORMAL)) != 0 || (rv = nng_msg_header_append_u8(msg,NNG_MSG_INTERFACE_DELAY)) != 0) {
+                fatal("nng_msg_alloc", rv);
         }
         return (rv);
 }
@@ -75,12 +79,14 @@ node0(const char *url)
 {
         nng_socket sock;
         int rv;
-        if ((rv = nng_pair0_open(&sock)) != 0) {
+        if ((rv = nng_mix_open(&sock)) != 0) {
                 fatal("nng_pair0_open", rv);
         }
          if ((rv = nng_listen(sock, url, NULL, 0)) !=0) {
                 fatal("nng_listen", rv);
         }
+
+        nng_socket_set_int(sock,NNG_OPT_MIX_RECVPOLICY,NNG_RECVPOLICY_NORMAL);
         return (recv_send(sock, NODE0));
 }
 
@@ -93,6 +99,7 @@ node1(const char *url)
         if ((rv = nng_mix_open(&sock)) != 0) {
                 fatal("nng_mix_open", rv);
         }
+        nng_socket_set_int(sock,NNG_OPT_MIX_SENDPOLICY,NNG_SENDPOLICY_RAW);
 
         //first dialer
         nng_dialer tmpd;//only an id, dont worry to pass by value

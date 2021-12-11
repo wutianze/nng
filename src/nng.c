@@ -1512,6 +1512,12 @@ nng_msg_header_insert(nng_msg *msg, const void *data, size_t sz)
 }
 
 int
+nng_msg_header_append_u8(nng_msg *msg, uint8_t v)
+{
+	return (nni_msg_header_append_u8(msg, v));
+}
+
+int
 nng_msg_header_append_u16(nng_msg *msg, uint16_t v)
 {
 	uint8_t buf[sizeof(v)];
@@ -1533,6 +1539,12 @@ nng_msg_header_append_u64(nng_msg *msg, uint64_t v)
 	uint8_t buf[sizeof(v)];
 	NNI_PUT64(buf, v);
 	return (nni_msg_header_append(msg, buf, sizeof(v)));
+}
+
+int
+nng_msg_header_insert_u8(nng_msg *msg, uint8_t v)
+{
+	return (nni_msg_header_insert_u8(msg,v));
 }
 
 int
@@ -1680,6 +1692,16 @@ nng_msg_trim_u64(nng_msg *m, uint64_t *vp)
 }
 
 int
+nng_msg_header_chop_u8(nng_msg *msg, uint8_t *val)
+{
+	if(nng_msg_header_len(msg)<sizeof(uint8_t)){
+		return NNG_EINVAL;
+	}
+	*val = nni_msg_header_chop_u8(msg);
+	return 0;
+}
+
+int
 nng_msg_header_chop_u16(nng_msg *msg, uint16_t *val)
 {
 	uint8_t *header;
@@ -1728,6 +1750,16 @@ nng_msg_header_chop_u64(nng_msg *msg, uint64_t *val)
 	*val = v;
 	nni_msg_header_chop(msg, sizeof(*val));
 	return (0);
+}
+
+int
+nng_msg_header_trim_u8(nng_msg *msg,uint8_t *val)
+{
+	if(nng_msg_header_len(msg)<sizeof(uint8_t)){
+		return NNG_EINVAL;
+	}
+	*val = nni_msg_header_trim_u8(msg);
+	return 0;
 }
 
 int
