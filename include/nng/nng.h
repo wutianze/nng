@@ -712,6 +712,9 @@ NNG_DECL nng_listener nng_pipe_listener(nng_pipe);
 #define NNG_MSG_INTERFACE_RELIABLE 2
 #define NNG_MSG_INTERFACE_SAFE 3
 
+#define NNG_INTERFACE_NATURE_MAX 4
+#define NNG_INTERFACE_NATURE_MIN 0
+
 // policy types used in protocol mix
 #define NNG_SENDPOLICY_RAW 0 // user decides which interface to use
 #define NNG_SENDPOLICY_SAMPLE 1 //sampling the msg and the sampled msg has high priority
