@@ -14,7 +14,7 @@
 #include <stdlib.h>
 
 #include "core/nng_impl.h"
-#include "nng/protocol/mix/mix.h"
+#include "nng/protocol/mix0/mix.h"
 
 /*for posix
 #include <fcntl.h>
