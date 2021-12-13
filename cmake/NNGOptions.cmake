@@ -52,6 +52,9 @@ mark_as_advanced(NNG_PROTO_PAIR0)
 option (NNG_PROTO_PAIR1 "Enable PAIRv1 protocol." ON)
 mark_as_advanced(NNG_PROTO_PAIR1)
 
+option (NNG_PROTO_MIX0 "Enable MIXv0 protocol." ON)
+mark_as_advanced(NNG_PROTO_MIX0)
+
 option (NNG_PROTO_PUSH0 "Enable PUSHv0 protocol." ON)
 mark_as_advanced(NNG_PROTO_PUSH0)
 

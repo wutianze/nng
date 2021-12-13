@@ -26,7 +26,7 @@
 #include <time.h>
 
 #include <nng/nng.h>
-#include <nng/protocol/reqrep0/req.h>
+#include <nng/protocol/mix0/mix.h>
 #include <nng/supplemental/util/platform.h>
 
 void

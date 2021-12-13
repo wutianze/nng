@@ -33,7 +33,7 @@
 #include <time.h>
 
 #include <nng/nng.h>
-#include <nng/protocol/reqrep0/rep.h>
+#include <nng/protocol/mix0/mix.h>
 #include <nng/supplemental/util/platform.h>
 
 // Parallel is the maximum number of outstanding requests we can handle.
@@ -79,7 +79,7 @@ server_cb(void *arg)
 		break;
 	case RECV:
 		if ((rv = nng_aio_result(work->aio)) != 0) {
-			fatal("nng_ctx_recv", rv);
+			fatal("nng_recv_aio", rv);
 		}
 		msg = nng_aio_get_msg(work->aio);
 		if ((rv = nng_msg_trim_u32(msg, &when)) != 0) {
@@ -115,7 +115,7 @@ server_cb(void *arg)
 	case SEND:
 		if ((rv = nng_aio_result(work->aio)) != 0) {
 			nng_msg_free(work->msg);
-			fatal("nng_ctx_send", rv);
+			fatal("nng_send_aio", rv);
 		}
 		work->state = RECV;
 		nng_recv_aio(work->sock, work->aio);
