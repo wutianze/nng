@@ -8,8 +8,8 @@
 // found online at https://opensource.org/licenses/MIT.
 //
 
-#ifndef NNG_PROTOCOL_MIX_CLIENT_H
-#define NNG_PROTOCOL_MIX_CLIENT_H
+#ifndef NNG_PROTOCOL_MIXCLIENT_H
+#define NNG_PROTOCOL_MIXCLIENT_H
 
 #ifdef __cplusplus
 extern "C" {
@@ -26,4 +26,4 @@ NNG_DECL int nng_mixclient_open(nng_socket *);
 }
 #endif
 
-#endif // NNG_PROTOCOL_MIX_CLIENT_H
+#endif // NNG_PROTOCOL_MIXCLIENT_H
