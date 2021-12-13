@@ -68,7 +68,8 @@ client(const char *url, const char *msecstr, const char* numstr)
         if((rv = nng_dialer_set_int(tmpd,NNG_OPT_INTERFACE_BW,0))!=0){
                 fatal("nng_dialer set INTERFACE_BW", rv);
         }
-        /*if((rv = nng_dialer_set_string(tmpd,NNG_OPT_TCP_BINDTODEVICE,"eth0"))!=0){
+	/*
+        if((rv = nng_dialer_set_string(tmpd,NNG_OPT_TCP_BINDTODEVICE,"eth0"))!=0){
                 fatal("nng_dialer_set TCP BINDTODEVICE", rv);
         }*/
         if((rv=nng_dialer_start(tmpd,0))!=0){
@@ -79,7 +80,7 @@ client(const char *url, const char *msecstr, const char* numstr)
                 fatal("nng_dialer_get_string", rv);
         }
         printf("the first interface is:%s\n",check_devicename);
-
+/*
         //second dialer
         nng_dialer tmpd1;
         if ((rv = nng_dialer_create(&tmpd1,sock, url)) != 0) {
@@ -91,17 +92,16 @@ client(const char *url, const char *msecstr, const char* numstr)
         if((rv = nng_dialer_set_int(tmpd1,NNG_OPT_INTERFACE_BW,4))!=0){
                 fatal("nng_dialer set INTERFACE_BW", rv);
         }
-	/*
         if((rv = nng_dialer_set_string(tmpd1,NNG_OPT_TCP_BINDTODEVICE,"wlan0"))!=0){
                 fatal("nng_dialer_set TCP BINDTODEVICE", rv);
-        }*/
+        }
         if((rv=nng_dialer_start(tmpd1,0))!=0){
                 fatal("nng_dialer_start", rv);
         }
         if((rv=nng_dialer_get_string(tmpd1,NNG_OPT_TCP_BINDTODEVICE,&check_devicename))!=0){
                 fatal("nng_dialer_get_string", rv);
         }
-        printf("the second interface is:%s\n",check_devicename);
+        printf("the second interface is:%s\n",check_devicename);*/
 	unsigned count;
 	for(count=0;count<num;count++){
 		start = nng_clock();
@@ -143,6 +143,7 @@ client(const char *url, const char *msecstr, const char* numstr)
 			fatal("nng_send", rv);
 		}// nng_sendmsg takes the ownership
 
+		printf("client sendmsg finished\n");
 		if ((rv = nng_recvmsg(sock, &msg, 0)) != 0) {
 			fatal("nng_recvmsg", rv);
 		}
