@@ -433,7 +433,7 @@ mixclient_pipe_recv_cb(void *arg)
 	// Store the pipe ID.
 	nni_msg_set_pipe(msg, nni_pipe_id(p->pipe));
 
-	// If the message is missing the hop count header, scrap it.
+	// If the message is missing the xxx header, scrap it.
 	if (nni_msg_len(msg) < sizeof(uint16_t)) {
 		BUMP_STAT(&s->stat_rx_malformed);
 		nni_msg_free(msg);
@@ -757,8 +757,8 @@ static nni_proto_sock_ops mixclient_sock_ops = {
 
 static nni_proto mixclient_proto = {
 	.proto_version  = NNI_PROTOCOL_VERSION,
-	.proto_self     = { NNG_MIX_SELF, NNG_MIX_SELF_NAME },
-	.proto_peer     = { NNG_MIX_PEER, NNG_MIX_PEER_NAME },
+	.proto_self     = { NNG_MIXCLIENT_SELF, NNG_MIXCLIENT_SELF_NAME },
+	.proto_peer     = { NNG_MIXCLIENT_PEER, NNG_MIXCLIENT_PEER_NAME },
 	.proto_flags    = NNI_PROTO_FLAG_SNDRCV,
 	.proto_sock_ops = &mixclient_sock_ops,
 	.proto_pipe_ops = &mixclient_pipe_ops,
