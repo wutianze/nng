@@ -641,7 +641,7 @@ mix_sock_recv(void *arg, nni_aio *aio)
 {
 	mix_sock *s = arg;
 	nni_msg* msg;
-	int rv = nni_msgq_tryget(s->urq_urgent,msg);
+	int rv = nni_msgq_tryget(s->urq_urgent,&msg);
 	if(rv == NNG_ECLOSED){
 		//any msgq closed means some error happens
 		nni_aio_finish_error(aio,rv);
@@ -651,7 +651,7 @@ mix_sock_recv(void *arg, nni_aio *aio)
 		return;
 	}
 
-	rv = nni_msgq_tryget(s->urq_normal,msg);
+	rv = nni_msgq_tryget(s->urq_normal,&msg);
 	if(rv == NNG_ECLOSED){
 		//any msgq closed means some error happens
 		nni_aio_finish_error(aio,rv);
@@ -661,7 +661,7 @@ mix_sock_recv(void *arg, nni_aio *aio)
 		return;
 	}
 	
-	rv = nni_msgq_tryget(s->urq_unimportant,msg);
+	rv = nni_msgq_tryget(s->urq_unimportant,&msg);
 	if(rv == NNG_ECLOSED){
 		//any msgq closed means some error happens
 		nni_aio_finish_error(aio,rv);

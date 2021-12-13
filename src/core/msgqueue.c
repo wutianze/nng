@@ -303,7 +303,7 @@ nni_msgq_tryput(nni_msgq *mq, nni_msg *msg)
 }
 
 int
-nni_msgq_tryget(nni_msgq *mq, nni_msg *msg)
+nni_msgq_tryget(nni_msgq *mq, nni_msg **msg)
 {
 	nni_aio *waio;
 
@@ -315,7 +315,7 @@ nni_msgq_tryget(nni_msgq *mq, nni_msg *msg)
 	
 	// If we have msg in the buffer, just get it.
 	if (mq->mq_len != 0) {
-		msg = mq->mq_msgs[mq->mq_get++];
+		*msg = mq->mq_msgs[mq->mq_get++];
 		if(mq->mq_get == mq->mq_alloc){
 			mq->mq_get = 0;
 		}
@@ -328,8 +328,8 @@ nni_msgq_tryget(nni_msgq *mq, nni_msg *msg)
 	// Nothing queued, maybe a writer is waiting
 	if ((waio = nni_list_first(&mq->mq_aio_putq)) != NULL) {
 
-		msg = nni_aio_get_msg(waio);
-		size_t len = nni_msg_len(msg);
+		*msg = nni_aio_get_msg(waio);
+		size_t len = nni_msg_len(*msg);
 
 		nni_aio_set_msg(waio,NULL);
 		nni_aio_list_remove(waio);
