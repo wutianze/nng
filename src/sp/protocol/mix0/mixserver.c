@@ -81,16 +81,11 @@ struct mixserver_sock {
 	// for pipe close&start will make changes to them
 	nni_mtx        mtx;	
 	nni_id_map     pipes;
-	nni_list       delay_list;
-	nni_list       bw_list;
-	nni_list       reliable_list;
-	nni_list       safe_list;
 	bool           started;
 	nni_aio        aio_get;
 
 	//policy related
 	int            recv_policy;
-	int            send_policy;
 #ifdef NNG_ENABLE_STATS
 	nni_stat_item  stat_mixserver;
 	nni_stat_item  stat_reject_mismatch;
@@ -110,10 +105,6 @@ struct mixserver_pipe {
 	nni_aio         aio_recv;
 	nni_aio         aio_get;
 	nni_aio         aio_put;
-	nni_list_node   node_delay;
-	nni_list_node   node_bw;
-	nni_list_node   node_reliable;
-	nni_list_node   node_safe;
 };
 
 static void
@@ -161,10 +152,6 @@ mixserver_sock_init(void *arg, nni_sock *sock)
 	mixserver_sock *s = arg;
 
 	nni_id_map_init(&s->pipes, 0, 0, false);
-	NNI_LIST_INIT(&s->delay_list, mixserver_pipe, node_delay);
-	NNI_LIST_INIT(&s->bw_list, mixserver_pipe, node_bw);
-	NNI_LIST_INIT(&s->reliable_list, mixserver_pipe, node_reliable);
-	NNI_LIST_INIT(&s->safe_list, mixserver_pipe, node_safe);
 	s->sock = sock;
 
 	// Raw mode uses this.
@@ -224,9 +211,10 @@ mixserver_sock_init(void *arg, nni_sock *sock)
 
 	int rv;
 	s->uwq = nni_sock_sendq(sock);
-	if(((rv = nni_msgq_init(&s->urq_urgent,2)) != 0) || 
-	((rv = nni_msgq_init(&s->urq_normal,2)) != 0) ||
-	((rv = nni_msgq_init(&s->urq_unimportant,2)) != 0)
+	//give server more buffer
+	if(((rv = nni_msgq_init(&s->urq_urgent,8)) != 0) || 
+	((rv = nni_msgq_init(&s->urq_normal,8)) != 0) ||
+	((rv = nni_msgq_init(&s->urq_unimportant,8)) != 0)
 	){
 		return rv;
 	}
@@ -313,28 +301,6 @@ mixserver_pipe_init(void *arg, nni_pipe *pipe, void *pair)
 }
 
 static int
-insert_in_pipe_list(nni_list*list_pipe, mixserver_pipe*new_pipe, const char*which){
-	int rv = 0;
-	mixserver_pipe*exist_pipe;
-	int new_val = 0;
-	if((rv = nni_pipe_getopt(new_pipe->pipe, which,&new_val,NULL,NNI_TYPE_INT32))!=0){
-		return rv;
-	}
-	NNI_LIST_FOREACH(list_pipe,exist_pipe){
-		int old_val = 0;
-		if((rv = nni_pipe_getopt(exist_pipe->pipe, which,&old_val,NULL,NNI_TYPE_INT32))!=0){
-			return rv;
-		}
-		if(old_val <= new_val){// new_pipe is better
-			nni_list_insert_before(list_pipe,new_pipe,exist_pipe);
-			return 0;
-		}
-	}
-	nni_list_append(list_pipe,new_pipe);
-	return 0;
-}
-
-static int
 mixserver_pipe_start(void *arg)
 {
 	mixserver_pipe *p = arg;
@@ -343,7 +309,7 @@ mixserver_pipe_start(void *arg)
 	int             rv;
 
 	nni_mtx_lock(&s->mtx);
-	if (nni_pipe_peer(p->pipe) != NNG_MIX_PEER) {
+	if (nni_pipe_peer(p->pipe) != NNG_MIXSERVER_PEER) {
 		nni_mtx_unlock(&s->mtx);
 		BUMP_STAT(&s->stat_reject_mismatch);
 		// Peer protocol mismatch.
@@ -355,22 +321,6 @@ mixserver_pipe_start(void *arg)
 	if ((rv = nni_id_set(&s->pipes, id, p)) != 0) {
 		nni_mtx_unlock(&s->mtx);
 		return (rv);
-	}
-	if ((rv = insert_in_pipe_list(&s->delay_list,p,NNG_OPT_INTERFACE_DELAY))!=0){
-		nni_mtx_unlock(&s->mtx);
-		return rv;
-	}
-	if ((rv = insert_in_pipe_list(&s->bw_list,p,NNG_OPT_INTERFACE_BW))!=0){
-		nni_mtx_unlock(&s->mtx);
-		return rv;
-	}
-	if ((rv = insert_in_pipe_list(&s->reliable_list,p,NNG_OPT_INTERFACE_RELIABLE))!=0){
-		nni_mtx_unlock(&s->mtx);
-		return rv;
-	}
-	if ((rv = insert_in_pipe_list(&s->safe_list,p,NNG_OPT_INTERFACE_SAFE))!=0){
-		nni_mtx_unlock(&s->mtx);
-		return rv;
 	}
 
 	if (!s->started) {
@@ -404,10 +354,6 @@ mixserver_pipe_close(void *arg)
 
 	nni_mtx_lock(&s->mtx);
 	nni_id_remove(&s->pipes, nni_pipe_id(p->pipe));
-	nni_list_node_remove(&p->node_delay);
-	nni_list_node_remove(&p->node_bw);
-	nni_list_node_remove(&p->node_reliable);
-	nni_list_node_remove(&p->node_safe);
 	nni_mtx_unlock(&s->mtx);
 
 	nni_msgq_close(p->send_queue);
@@ -533,43 +479,24 @@ mixserver_sock_get_cb(void *arg)
 	nni_aio_set_msg(&s->aio_get, NULL);
 
 	uint32_t id = nni_msg_get_pipe(msg); 
-
-	switch(s->send_policy){
-	case NNG_SENDPOLICY_RAW:{
-		if(nni_msg_header_len(msg) != sizeof(uint16_t)){
-			BUMP_STAT(&s->stat_tx_malformed);
+	if(nni_msg_header_len(msg) != sizeof(uint16_t)){
+		BUMP_STAT(&s->stat_tx_malformed);
+		goto send_fail;
+	}
+	//uint8_t urgency_level = nni_msg_header_peek_u8(msg);
+	uint8_t nature_chosen = nni_msg_header_chop_u8(msg);
+	if(nni_msg_header_append_u8(msg, NNG_SENDPOLICY_RAW) != 0){// TODO int -> uint8
+		goto send_fail;
+	}
+	if(id != 0){
+		nni_mtx_lock(&s->mtx);
+		mixserver_pipe *p = nni_id_get(&s->pipes,id);
+		if((p == NULL) || nni_msgq_tryput(p->send_queue,msg) != 0){
+			BUMP_STAT(&s->stat_tx_drop);
 			goto send_fail;
 		}
-		//uint8_t urgency_level = nni_msg_header_peek_u8(msg);
-		uint8_t nature_chosen = nni_msg_header_chop_u8(msg);
-		if(nni_msg_header_append_u8(msg, NNG_SENDPOLICY_RAW) != 0){// TODO int -> uint8
-			goto send_fail;
-		}
-		if(id != 0){
-			nni_mtx_lock(&s->mtx);
-			mixserver_pipe *p = nni_id_get(&s->pipes,id);
-			if((p == NULL) || nni_msgq_tryput(p->send_queue,msg) != 0){
-				BUMP_STAT(&s->stat_tx_drop);
-				goto send_fail;
-			}
-		}else{
-			nni_mtx_lock(&s->mtx);
-			nni_list* chosen_list = NULL;
-			choose_nature_list(nature_chosen,s,&chosen_list);
-			if(tryput_in_pipe_list(chosen_list,msg) != 0){
-				BUMP_STAT(&s->stat_tx_drop);
-				goto send_fail;
-			}
-		}
-		break;
-	}
-	case NNG_SENDPOLICY_SAMPLE:{
-		break;
-	}
-	case NNG_SENDPOLICY_DEFAULT:
-	default:{
-		break;
-	}
+	}else{
+		goto send_fail;
 	}
 	nni_mtx_unlock(&s->mtx);
 	nni_msgq_aio_get(s->uwq, &s->aio_get);
@@ -757,8 +684,8 @@ static nni_proto_sock_ops mixserver_sock_ops = {
 
 static nni_proto mixserver_proto = {
 	.proto_version  = NNI_PROTOCOL_VERSION,
-	.proto_self     = { NNG_MIX_SELF, NNG_MIX_SELF_NAME },
-	.proto_peer     = { NNG_MIX_PEER, NNG_MIX_PEER_NAME },
+	.proto_self     = { NNG_MIXSERVER_SELF, NNG_MIXSERVER_SELF_NAME },
+	.proto_peer     = { NNG_MIXSERVER_PEER, NNG_MIXSERVER_PEER_NAME },
 	.proto_flags    = NNI_PROTO_FLAG_SNDRCV,
 	.proto_sock_ops = &mixserver_sock_ops,
 	.proto_pipe_ops = &mixserver_pipe_ops,
