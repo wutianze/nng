@@ -343,7 +343,7 @@ mixclient_pipe_start(void *arg)
 	int             rv;
 
 	nni_mtx_lock(&s->mtx);
-	if (nni_pipe_peer(p->pipe) != NNG_MIX_PEER) {
+	if (nni_pipe_peer(p->pipe) != NNG_MIXCLIENT_PEER) {
 		nni_mtx_unlock(&s->mtx);
 		BUMP_STAT(&s->stat_reject_mismatch);
 		// Peer protocol mismatch.
