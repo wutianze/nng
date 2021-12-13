@@ -419,7 +419,6 @@ mix_pipe_recv_cb(void *arg)
 	mix_pipe *p = arg;
 	mix_sock *s = p->pair;
 	nni_msg *       msg;
-	uint32_t        hdr;
 	nni_pipe *      pipe = p->pipe;
 	size_t          len;
 
@@ -491,28 +490,30 @@ tryput_in_pipe_list(nni_list*list_pipe, nni_msg*msg){
 	int rv = 0;
 	mix_pipe*exist_pipe;
 	NNI_LIST_FOREACH(list_pipe,exist_pipe){
-		if(nni_msgq_tryput(exist_pipe->send_queue,msg)==0){
+		if((rv = nni_msgq_tryput(exist_pipe->send_queue,msg))==0){
 			return 0;
+		}else{
+			return rv;
 		}
 	}
 	return NNG_EAGAIN;
 }
 
 static void
-choose_nature_list(uint8_t nature, mix_sock*s,nni_list*chosen_list){
+choose_nature_list(uint8_t nature, mix_sock*s,nni_list**chosen_list){
 	switch(nature){
 			case NNG_MSG_INTERFACE_DELAY:
-			chosen_list = &s->delay_list;
+			*chosen_list = &s->delay_list;
 			break;
 			case NNG_MSG_INTERFACE_BW:
-			chosen_list = &s->bw_list;
+			*chosen_list = &s->bw_list;
 			break;
 			case NNG_MSG_INTERFACE_RELIABLE:
-			chosen_list = &s->reliable_list;
+			*chosen_list = &s->reliable_list;
 			break;
 			//Other msgs use the safest pipe
 			default:	
-			chosen_list = &s->safe_list;
+			*chosen_list = &s->safe_list;
 	}
 	return;
 }
@@ -539,7 +540,7 @@ mix_sock_get_cb(void *arg)
 			BUMP_STAT(&s->stat_tx_malformed);
 			goto send_fail;
 		}
-		uint8_t urgency_level = nni_msg_header_peek_u8(msg);
+		//uint8_t urgency_level = nni_msg_header_peek_u8(msg);
 		uint8_t nature_chosen = nni_msg_header_chop_u8(msg);
 		if(nni_msg_header_append_u8(msg, NNG_SENDPOLICY_RAW) != 0){// TODO int -> uint8
 			goto send_fail;
@@ -554,7 +555,7 @@ mix_sock_get_cb(void *arg)
 		}else{
 			nni_mtx_lock(&s->mtx);
 			nni_list* chosen_list = NULL;
-			choose_nature_list(nature_chosen,s,chosen_list);
+			choose_nature_list(nature_chosen,s,&chosen_list);
 			if(tryput_in_pipe_list(chosen_list,msg) != 0){
 				BUMP_STAT(&s->stat_tx_drop);
 				goto send_fail;
@@ -692,7 +693,7 @@ mix_set_send_policy(void *arg, const void *buf, size_t sz, nni_opt_type t)
 {
 	mix_sock *s = arg;
 
-	return (nni_copyin_int(&s->send_policy, buf, sz, -1, NNI_SENDPOLICY_DEFAULT, t));
+	return (nni_copyin_int(&s->send_policy, buf, sz, -1, NNG_SENDPOLICY_DEFAULT, t));
 }
 
 static int
@@ -707,7 +708,7 @@ mix_set_recv_policy(void *arg, const void *buf, size_t sz, nni_opt_type t)
 {
 	mix_sock *s = arg;
 
-	return (nni_copyin_int(&s->recv_policy, buf, sz, -1, NNI_RECVPOLICY_UNIMPORTANT, t));
+	return (nni_copyin_int(&s->recv_policy, buf, sz, -1, NNG_RECVPOLICY_UNIMPORTANT, t));
 }
 
 static int

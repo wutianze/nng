@@ -38,6 +38,7 @@ extern void     nni_msg_dump(const char *, const nni_msg *);
 extern uint32_t nni_msg_trim_u32(nni_msg *);
 extern uint8_t nni_msg_trim_u8(nni_msg *);
 extern uint8_t nni_msg_chop_u8(nni_msg *);
+extern uint8_t nni_msg_peek_u8(nni_msg *);
 extern void     nni_msg_header_append_u32(nni_msg *, uint32_t);
 extern uint32_t nni_msg_header_trim_u32(nni_msg *);
 extern int     nni_msg_header_append_u8(nni_msg *, uint8_t);
