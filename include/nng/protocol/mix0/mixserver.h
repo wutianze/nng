@@ -8,22 +8,22 @@
 // found online at https://opensource.org/licenses/MIT.
 //
 
-#ifndef NNG_PROTOCOL_MIX_MIX_H
-#define NNG_PROTOCOL_MIX_MIX_H
+#ifndef NNG_PROTOCOL_MIX_SERVER_H
+#define NNG_PROTOCOL_MIX_SERVER_H
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-NNG_DECL int nng_mix_open(nng_socket *);
+NNG_DECL int nng_mixserver_open(nng_socket *);
 
-#define NNG_MIX_SELF 0x80
+#define NNG_MIX_SELF 0x81
 #define NNG_MIX_PEER 0x80
-#define NNG_MIX_SELF_NAME "mix"
-#define NNG_MIX_PEER_NAME "mix"
+#define NNG_MIX_SELF_NAME "mixserver"
+#define NNG_MIX_PEER_NAME "mixclient"
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif // NNG_PROTOCOL_MIX_MIX_H
+#endif // NNG_PROTOCOL_MIX_SERVER_H

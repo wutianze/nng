@@ -8,13 +8,13 @@
 // found online at https://opensource.org/licenses/MIT.
 //
 
-// now we do not support windows platform in mix
+// now we do not support windows platform in mixclient
 //#ifndef _WIN32
 
 #include <stdlib.h>
 
 #include "core/nng_impl.h"
-#include "nng/protocol/mix0/mix.h"
+#include "nng/protocol/mix0/mixclient.h"
 
 /*for posix
 #include <fcntl.h>
@@ -43,29 +43,29 @@ bool poll_fd(int fd){
 #define BUMP_STAT(x)
 #endif
 
-typedef struct mix_pipe mix_pipe;
-typedef struct mix_sock mix_sock;
+typedef struct mixclient_pipe mixclient_pipe;
+typedef struct mixclient_sock mixclient_sock;
 
-static void mix_sock_get_cb(void *);
-static void mix_pipe_send_cb(void *);
-static void mix_pipe_recv_cb(void *);
-static void mix_pipe_get_cb(void *);
-static void mix_pipe_put_cb(void *);
-static void mix_pipe_fini(void *);
+static void mixclient_sock_get_cb(void *);
+static void mixclient_pipe_send_cb(void *);
+static void mixclient_pipe_recv_cb(void *);
+static void mixclient_pipe_get_cb(void *);
+static void mixclient_pipe_put_cb(void *);
+static void mixclient_pipe_fini(void *);
 
 /*use func pointer will bring sync overhead
-struct mix_send_policy_ops{
-	int (*choose_and_send)(mix_sock*, nni_msg*);
+struct mixclient_send_policy_ops{
+	int (*choose_and_send)(mixclient_sock*, nni_msg*);
 };
-struct mix_recv_policy_ops{
-	int (*recv_and_choose)(mix_sock*, nni_msg*);
+struct mixclient_recv_policy_ops{
+	int (*recv_and_choose)(mixclient_sock*, nni_msg*);
 };
 
-typedef struct mix_send_policy_ops mix_send_policy_ops;
-typedef struct mix_recv_policy_ops mix_recv_policy_ops;
+typedef struct mixclient_send_policy_ops mixclient_send_policy_ops;
+typedef struct mixclient_recv_policy_ops mixclient_recv_policy_ops;
 */ 
-// mix_sock is our per-socket protocol private structure.
-struct mix_sock {
+// mixclient_sock is our per-socket protocol private structure.
+struct mixclient_sock {
 	nni_sock      *sock;
 	nni_msgq      *uwq;
 	nni_msgq      *urq_urgent;
@@ -92,7 +92,7 @@ struct mix_sock {
 	int            recv_policy;
 	int            send_policy;
 #ifdef NNG_ENABLE_STATS
-	nni_stat_item  stat_mix;
+	nni_stat_item  stat_mixclient;
 	nni_stat_item  stat_reject_mismatch;
 	nni_stat_item  stat_reject_already;
 	nni_stat_item  stat_rx_malformed;
@@ -101,10 +101,10 @@ struct mix_sock {
 #endif
 };
 
-// mix_pipe is our per-pipe protocol private structure.
-struct mix_pipe {
+// mixclient_pipe is our per-pipe protocol private structure.
+struct mixclient_pipe {
 	nni_pipe       *pipe;
-	mix_sock       *pair;
+	mixclient_sock       *pair;
 	nni_msgq       *send_queue;
 	nni_aio         aio_send;
 	nni_aio         aio_recv;
@@ -117,9 +117,9 @@ struct mix_pipe {
 };
 
 static void
-mix_sock_fini(void *arg)
+mixclient_sock_fini(void *arg)
 {
-	mix_sock *s = arg;
+	mixclient_sock *s = arg;
 
 	nni_aio_fini(&s->aio_get);
 	nni_id_map_fini(&s->pipes);
@@ -131,8 +131,8 @@ mix_sock_fini(void *arg)
 
 #ifdef NNG_ENABLE_STATS
 static void
-mix_add_sock_stat(
-    mix_sock *s, nni_stat_item *item, const nni_stat_info *info)
+mixclient_add_sock_stat(
+    mixclient_sock *s, nni_stat_item *item, const nni_stat_info *info)
 {
 	nni_stat_init(item, info);
 	nni_sock_add_stat(s->sock, item);
@@ -140,15 +140,15 @@ mix_add_sock_stat(
 #endif
 
 static void
-mix_sock_open(void *arg)
+mixclient_sock_open(void *arg)
 {
 	NNI_ARG_UNUSED(arg);
 }
 
 static void
-mix_sock_close(void *arg)
+mixclient_sock_close(void *arg)
 {
-	mix_sock *s = arg;
+	mixclient_sock *s = arg;
 	nni_aio_close(&s->aio_get);
 	nni_msgq_close(s->urq_urgent);
 	nni_msgq_close(s->urq_normal);
@@ -156,26 +156,26 @@ mix_sock_close(void *arg)
 }
 
 static int
-mix_sock_init(void *arg, nni_sock *sock)
+mixclient_sock_init(void *arg, nni_sock *sock)
 {
-	mix_sock *s = arg;
+	mixclient_sock *s = arg;
 
 	nni_id_map_init(&s->pipes, 0, 0, false);
-	NNI_LIST_INIT(&s->delay_list, mix_pipe, node_delay);
-	NNI_LIST_INIT(&s->bw_list, mix_pipe, node_bw);
-	NNI_LIST_INIT(&s->reliable_list, mix_pipe, node_reliable);
-	NNI_LIST_INIT(&s->safe_list, mix_pipe, node_safe);
+	NNI_LIST_INIT(&s->delay_list, mixclient_pipe, node_delay);
+	NNI_LIST_INIT(&s->bw_list, mixclient_pipe, node_bw);
+	NNI_LIST_INIT(&s->reliable_list, mixclient_pipe, node_reliable);
+	NNI_LIST_INIT(&s->safe_list, mixclient_pipe, node_safe);
 	s->sock = sock;
 
 	// Raw mode uses this.
 	nni_mtx_init(&s->mtx);
 
-	nni_aio_init(&s->aio_get, mix_sock_get_cb, s);
+	nni_aio_init(&s->aio_get, mixclient_sock_get_cb, s);
 
 #ifdef NNG_ENABLE_STATS
-	static const nni_stat_info mix_info = {
-		.si_name = "mix",
-		.si_desc = "mixamorous mode?",
+	static const nni_stat_info mixclient_info = {
+		.si_name = "mixclient",
+		.si_desc = "mixclientamorous mode?",
 		.si_type = NNG_STAT_BOOLEAN,
 	};
 	static const nni_stat_info mismatch_info = {
@@ -212,14 +212,14 @@ mix_sock_init(void *arg, nni_sock *sock)
 		.si_atomic = true,
 	};
 
-	mix_add_sock_stat(s, &s->stat_mix, &mix_info);
-	mix_add_sock_stat(s, &s->stat_reject_mismatch, &mismatch_info);
-	mix_add_sock_stat(s, &s->stat_reject_already, &already_info);
-	mix_add_sock_stat(s, &s->stat_tx_drop, &tx_drop_info);
-	mix_add_sock_stat(s, &s->stat_rx_malformed, &rx_malformed_info);
-	mix_add_sock_stat(s, &s->stat_tx_malformed, &tx_malformed_info);
+	mixclient_add_sock_stat(s, &s->stat_mixclient, &mixclient_info);
+	mixclient_add_sock_stat(s, &s->stat_reject_mismatch, &mismatch_info);
+	mixclient_add_sock_stat(s, &s->stat_reject_already, &already_info);
+	mixclient_add_sock_stat(s, &s->stat_tx_drop, &tx_drop_info);
+	mixclient_add_sock_stat(s, &s->stat_rx_malformed, &rx_malformed_info);
+	mixclient_add_sock_stat(s, &s->stat_tx_malformed, &tx_malformed_info);
 
-	nni_stat_set_bool(&s->stat_mix, true);
+	nni_stat_set_bool(&s->stat_mixclient, true);
 #endif
 
 	int rv;
@@ -258,9 +258,9 @@ mix_sock_init(void *arg, nni_sock *sock)
 }
 
 static void
-mix_pipe_stop(void *arg)
+mixclient_pipe_stop(void *arg)
 {
-	mix_pipe *p = arg;
+	mixclient_pipe *p = arg;
 
 	nni_aio_stop(&p->aio_send);
 	nni_aio_stop(&p->aio_recv);
@@ -269,9 +269,9 @@ mix_pipe_stop(void *arg)
 }
 
 static void
-mix_pipe_fini(void *arg)
+mixclient_pipe_fini(void *arg)
 {
-	mix_pipe *p = arg;
+	mixclient_pipe *p = arg;
 
 	nni_aio_fini(&p->aio_send);
 	nni_aio_fini(&p->aio_recv);
@@ -281,18 +281,18 @@ mix_pipe_fini(void *arg)
 }
 
 static int
-mix_pipe_init(void *arg, nni_pipe *pipe, void *pair)
+mixclient_pipe_init(void *arg, nni_pipe *pipe, void *pair)
 {
-	mix_pipe *p = arg;
+	mixclient_pipe *p = arg;
 	int             rv;
 
-	nni_aio_init(&p->aio_send, mix_pipe_send_cb, p);
-	nni_aio_init(&p->aio_recv, mix_pipe_recv_cb, p);
-	nni_aio_init(&p->aio_get, mix_pipe_get_cb, p);
-	nni_aio_init(&p->aio_put, mix_pipe_put_cb, p);
+	nni_aio_init(&p->aio_send, mixclient_pipe_send_cb, p);
+	nni_aio_init(&p->aio_recv, mixclient_pipe_recv_cb, p);
+	nni_aio_init(&p->aio_get, mixclient_pipe_get_cb, p);
+	nni_aio_init(&p->aio_put, mixclient_pipe_put_cb, p);
 
 	if ((rv = nni_msgq_init(&p->send_queue, 1)) != 0) {
-		mix_pipe_fini(p);
+		mixclient_pipe_fini(p);
 		return (rv);
 	}
 
@@ -313,9 +313,9 @@ mix_pipe_init(void *arg, nni_pipe *pipe, void *pair)
 }
 
 static int
-insert_in_pipe_list(nni_list*list_pipe, mix_pipe*new_pipe, const char*which){
+insert_in_pipe_list(nni_list*list_pipe, mixclient_pipe*new_pipe, const char*which){
 	int rv = 0;
-	mix_pipe*exist_pipe;
+	mixclient_pipe*exist_pipe;
 	int new_val = 0;
 	if((rv = nni_pipe_getopt(new_pipe->pipe, which,&new_val,NULL,NNI_TYPE_INT32))!=0){
 		return rv;
@@ -335,10 +335,10 @@ insert_in_pipe_list(nni_list*list_pipe, mix_pipe*new_pipe, const char*which){
 }
 
 static int
-mix_pipe_start(void *arg)
+mixclient_pipe_start(void *arg)
 {
-	mix_pipe *p = arg;
-	mix_sock *s = p->pair;
+	mixclient_pipe *p = arg;
+	mixclient_sock *s = p->pair;
 	uint32_t        id;
 	int             rv;
 
@@ -379,7 +379,7 @@ mix_pipe_start(void *arg)
 	s->started = true;
 	nni_mtx_unlock(&s->mtx);
 
-	// Schedule a get.  In mixamorous mode we get on the per pipe
+	// Schedule a get.  In mixclientamorous mode we get on the per pipe
 	// send_queue, as the socket distributes to us. In monogamous mode
 	// we bypass and get from the upper write queue directly (saving a
 	// set of context switches).
@@ -392,10 +392,10 @@ mix_pipe_start(void *arg)
 }
 
 static void
-mix_pipe_close(void *arg)
+mixclient_pipe_close(void *arg)
 {
-	mix_pipe *p = arg;
-	mix_sock *s = p->pair;
+	mixclient_pipe *p = arg;
+	mixclient_sock *s = p->pair;
 
 	nni_aio_close(&p->aio_send);
 	nni_aio_close(&p->aio_recv);
@@ -414,10 +414,10 @@ mix_pipe_close(void *arg)
 }
 
 static void
-mix_pipe_recv_cb(void *arg)
+mixclient_pipe_recv_cb(void *arg)
 {
-	mix_pipe *p = arg;
-	mix_sock *s = p->pair;
+	mixclient_pipe *p = arg;
+	mixclient_sock *s = p->pair;
 	nni_msg *       msg;
 	nni_pipe *      pipe = p->pipe;
 	size_t          len;
@@ -488,7 +488,7 @@ mix_pipe_recv_cb(void *arg)
 static int
 tryput_in_pipe_list(nni_list*list_pipe, nni_msg*msg){
 	int rv = 0;
-	mix_pipe*exist_pipe;
+	mixclient_pipe*exist_pipe;
 	NNI_LIST_FOREACH(list_pipe,exist_pipe){
 		if((rv = nni_msgq_tryput(exist_pipe->send_queue,msg))==0){
 			return 0;
@@ -500,7 +500,7 @@ tryput_in_pipe_list(nni_list*list_pipe, nni_msg*msg){
 }
 
 static void
-choose_nature_list(uint8_t nature, mix_sock*s,nni_list**chosen_list){
+choose_nature_list(uint8_t nature, mixclient_sock*s,nni_list**chosen_list){
 	switch(nature){
 			case NNG_MSG_INTERFACE_DELAY:
 			*chosen_list = &s->delay_list;
@@ -519,9 +519,9 @@ choose_nature_list(uint8_t nature, mix_sock*s,nni_list**chosen_list){
 }
 
 static void
-mix_sock_get_cb(void *arg)
+mixclient_sock_get_cb(void *arg)
 {
-	mix_sock *s = arg;
+	mixclient_sock *s = arg;
 	nni_msg *       msg;
 
 	if (nni_aio_result(&s->aio_get) != 0) {
@@ -547,7 +547,7 @@ mix_sock_get_cb(void *arg)
 		}
 		if(id != 0){
 			nni_mtx_lock(&s->mtx);
-			mix_pipe *p = nni_id_get(&s->pipes,id);
+			mixclient_pipe *p = nni_id_get(&s->pipes,id);
 			if((p == NULL) || nni_msgq_tryput(p->send_queue,msg) != 0){
 				BUMP_STAT(&s->stat_tx_drop);
 				goto send_fail;
@@ -581,9 +581,9 @@ send_fail:
 }
 
 static void
-mix_pipe_put_cb(void *arg)
+mixclient_pipe_put_cb(void *arg)
 {
-	mix_pipe *p = arg;
+	mixclient_pipe *p = arg;
 
 	if (nni_aio_result(&p->aio_put) != 0) {
 		nni_msg_free(nni_aio_get_msg(&p->aio_put));
@@ -595,9 +595,9 @@ mix_pipe_put_cb(void *arg)
 }
 
 static void
-mix_pipe_get_cb(void *arg)
+mixclient_pipe_get_cb(void *arg)
 {
-	mix_pipe *p = arg;
+	mixclient_pipe *p = arg;
 	nni_msg *       msg;
 
 	if (nni_aio_result(&p->aio_get) != 0) {
@@ -613,9 +613,9 @@ mix_pipe_get_cb(void *arg)
 }
 
 static void
-mix_pipe_send_cb(void *arg)
+mixclient_pipe_send_cb(void *arg)
 {
-	mix_pipe *p = arg;
+	mixclient_pipe *p = arg;
 
 	if (nni_aio_result(&p->aio_send) != 0) {
 		nni_msg_free(nni_aio_get_msg(&p->aio_send));
@@ -628,18 +628,18 @@ mix_pipe_send_cb(void *arg)
 }
 
 static void
-mix_sock_send(void *arg, nni_aio *aio)
+mixclient_sock_send(void *arg, nni_aio *aio)
 {
-	mix_sock *s = arg;
+	mixclient_sock *s = arg;
 
 	nni_sock_bump_tx(s->sock, nni_msg_len(nni_aio_get_msg(aio)));
 	nni_msgq_aio_put(s->uwq, aio);
 }
 
 static void
-mix_sock_recv(void *arg, nni_aio *aio)
+mixclient_sock_recv(void *arg, nni_aio *aio)
 {
-	mix_sock *s = arg;
+	mixclient_sock *s = arg;
 	nni_msg* msg;
 	int rv = nni_msgq_tryget(s->urq_urgent,&msg);
 	if(rv == NNG_ECLOSED){
@@ -689,54 +689,54 @@ mix_sock_recv(void *arg, nni_aio *aio)
 }
 
 static int
-mix_set_send_policy(void *arg, const void *buf, size_t sz, nni_opt_type t)
+mixclient_set_send_policy(void *arg, const void *buf, size_t sz, nni_opt_type t)
 {
-	mix_sock *s = arg;
+	mixclient_sock *s = arg;
 
 	return (nni_copyin_int(&s->send_policy, buf, sz, -1, NNG_SENDPOLICY_DEFAULT, t));
 }
 
 static int
-mix_get_send_policy(void *arg, void *buf, size_t *szp, nni_opt_type t)
+mixclient_get_send_policy(void *arg, void *buf, size_t *szp, nni_opt_type t)
 {
-	mix_sock *s = arg;
+	mixclient_sock *s = arg;
 	return (nni_copyout_int(s->send_policy, buf, szp, t));
 }
 
 static int
-mix_set_recv_policy(void *arg, const void *buf, size_t sz, nni_opt_type t)
+mixclient_set_recv_policy(void *arg, const void *buf, size_t sz, nni_opt_type t)
 {
-	mix_sock *s = arg;
+	mixclient_sock *s = arg;
 
 	return (nni_copyin_int(&s->recv_policy, buf, sz, -1, NNG_RECVPOLICY_UNIMPORTANT, t));
 }
 
 static int
-mix_get_recv_policy(void *arg, void *buf, size_t *szp, nni_opt_type t)
+mixclient_get_recv_policy(void *arg, void *buf, size_t *szp, nni_opt_type t)
 {
-	mix_sock *s = arg;
+	mixclient_sock *s = arg;
 	return (nni_copyout_int(s->recv_policy, buf, szp, t));
 }
 
-static nni_proto_pipe_ops mix_pipe_ops = {
-	.pipe_size  = sizeof(mix_pipe),
-	.pipe_init  = mix_pipe_init,
-	.pipe_fini  = mix_pipe_fini,
-	.pipe_start = mix_pipe_start,
-	.pipe_close = mix_pipe_close,
-	.pipe_stop  = mix_pipe_stop,
+static nni_proto_pipe_ops mixclient_pipe_ops = {
+	.pipe_size  = sizeof(mixclient_pipe),
+	.pipe_init  = mixclient_pipe_init,
+	.pipe_fini  = mixclient_pipe_fini,
+	.pipe_start = mixclient_pipe_start,
+	.pipe_close = mixclient_pipe_close,
+	.pipe_stop  = mixclient_pipe_stop,
 };
 
-static nni_option mix_sock_options[] = {
+static nni_option mixclient_sock_options[] = {
 	{
 	    .o_name = NNG_OPT_MIX_SENDPOLICY,
-	    .o_get  = mix_get_send_policy,
-	    .o_set  = mix_set_send_policy,
+	    .o_get  = mixclient_get_send_policy,
+	    .o_set  = mixclient_set_send_policy,
 	},
 	{
 	    .o_name = NNG_OPT_MIX_RECVPOLICY,
-	    .o_get  = mix_get_recv_policy,
-	    .o_set  = mix_set_recv_policy,
+	    .o_get  = mixclient_get_recv_policy,
+	    .o_set  = mixclient_set_recv_policy,
 	},
 	// terminate list
 	{
@@ -744,29 +744,29 @@ static nni_option mix_sock_options[] = {
 	},
 };
 
-static nni_proto_sock_ops mix_sock_ops = {
-	.sock_size    = sizeof(mix_sock),
-	.sock_init    = mix_sock_init,
-	.sock_fini    = mix_sock_fini,
-	.sock_open    = mix_sock_open,
-	.sock_close   = mix_sock_close,
-	.sock_recv    = mix_sock_recv,
-	.sock_send    = mix_sock_send,
-	.sock_options = mix_sock_options,
+static nni_proto_sock_ops mixclient_sock_ops = {
+	.sock_size    = sizeof(mixclient_sock),
+	.sock_init    = mixclient_sock_init,
+	.sock_fini    = mixclient_sock_fini,
+	.sock_open    = mixclient_sock_open,
+	.sock_close   = mixclient_sock_close,
+	.sock_recv    = mixclient_sock_recv,
+	.sock_send    = mixclient_sock_send,
+	.sock_options = mixclient_sock_options,
 };
 
-static nni_proto mix_proto = {
+static nni_proto mixclient_proto = {
 	.proto_version  = NNI_PROTOCOL_VERSION,
 	.proto_self     = { NNG_MIX_SELF, NNG_MIX_SELF_NAME },
 	.proto_peer     = { NNG_MIX_PEER, NNG_MIX_PEER_NAME },
 	.proto_flags    = NNI_PROTO_FLAG_SNDRCV,
-	.proto_sock_ops = &mix_sock_ops,
-	.proto_pipe_ops = &mix_pipe_ops,
+	.proto_sock_ops = &mixclient_sock_ops,
+	.proto_pipe_ops = &mixclient_pipe_ops,
 };
 
 int
-nng_mix_open(nng_socket *sock)
+nng_mixclient_open(nng_socket *sock)
 {
-	return (nni_proto_open(sock, &mix_proto));
+	return (nni_proto_open(sock, &mixclient_proto));
 }
 //#endif

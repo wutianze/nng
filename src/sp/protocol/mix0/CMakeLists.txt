@@ -11,8 +11,12 @@
 #  MIXv0 protocol
 nng_directory(mix0)
 
-nng_sources_if(NNG_PROTO_MIX0 mix.c)
-nng_headers_if(NNG_PROTO_MIX0 nng/protocol/mix0/mix.h)
-nng_defines_if(NNG_PROTO_MIX0 NNG_HAVE_MIX0)
+nng_sources_if(NNG_PROTO_MIXSERVER0 mixserver.c)
+nng_headers_if(NNG_PROTO_MIXSERVER0 nng/protocol/mix0/mixserver.h)
+nng_defines_if(NNG_PROTO_MIXSERVER0 NNG_HAVE_MIXSERVER0)
 
-#nng_test(mix0_test)
+nng_sources_if(NNG_PROTO_MIXCLIENT0 mixclient.c)
+nng_headers_if(NNG_PROTO_MIXCLIENT0 nng/protocol/mix0/mixclient.h)
+nng_defines_if(NNG_PROTO_MIXCLIENT0 NNG_HAVE_MIXCLIENT0)
+
+
