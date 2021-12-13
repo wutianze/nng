@@ -47,7 +47,7 @@ recv_send(nng_socket sock, char *name)
 {
         int rv;
         /*if ((rv = nng_socket_set_ms(sock, NNG_OPT_RECVTIMEO, 100)) != 0) {
-                fatal("nng_setopt_ms", rv);
+                fatal("nng_set_ms", rv);
         }*/
         for (;;) {
                 recv_name(sock, name);
@@ -61,7 +61,7 @@ send_recv(nng_socket sock, char *name)
 {
         int rv;
         /*if ((rv = nng_socket_set_ms(sock, NNG_OPT_RECVTIMEO, 100)) != 0) {
-                fatal("nng_setopt_ms", rv);
+                fatal("nng_set_ms", rv);
         }*/
         for (;;) {
                 send_name(sock, name);
@@ -75,6 +75,7 @@ node0(const char *url)
 {
         nng_socket sock;
         int rv;
+	printf("I am node0\n");
         if ((rv = nng_pair0_open(&sock)) != 0) {
                 fatal("nng_pair0_open", rv);
         }
@@ -89,6 +90,7 @@ node1(const char *url)
 {
         nng_socket sock;
         int rv;
+	printf("I am node1\n");
         sleep(1);
         if ((rv = nng_pair0_open(&sock)) != 0) {
                 fatal("nng_pair0_open", rv);
@@ -97,15 +99,16 @@ node1(const char *url)
         if ((rv = nng_dialer_create(&tmpd,sock, url)) != 0) {
                 fatal("nng_dialer_create", rv);
         }
-        if((rv = nng_dialer_setopt_string(tmpd,NNG_OPT_TCP_BINDTODEVICE,"wlan0"))!=0){
-                fatal("nng_dialer_setopt_string", rv);
+        if((rv = nng_dialer_set_string(tmpd,NNG_OPT_TCP_BINDTODEVICE,"eth0"))!=0){
+                fatal("nng_dialer_set_string", rv);
         }
+
         if((rv=nng_dialer_start(tmpd,0))!=0){
                 fatal("nng_dialer_start", rv);
         }
         char* check_devicename;
-        if((rv=nng_dialer_getopt_string(tmpd,NNG_OPT_TCP_BINDTODEVICE,&check_devicename))!=0){
-                fatal("nng_dialer_getopt_string", rv);
+        if((rv=nng_dialer_get_string(tmpd,NNG_OPT_TCP_BINDTODEVICE,&check_devicename))!=0){
+                fatal("nng_dialer_get_string", rv);
         }
         printf("device:%s is set\n",check_devicename);
         return (send_recv(sock, NODE1));

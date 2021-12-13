@@ -62,21 +62,21 @@ client(const char *url, const char *msecstr, const char* numstr)
         if ((rv = nng_dialer_create(&tmpd,sock, url)) != 0) {
                 fatal("nng_dialer_create", rv);
         }
-        if((rv = nng_dialer_setopt_int(tmpd,NNG_OPT_INTERFACE_DELAY,5))!=0){
+        if((rv = nng_dialer_set_int(tmpd,NNG_OPT_INTERFACE_DELAY,4))!=0){
                 fatal("nng_dialer set INTERFACE_DELAY", rv);
         }
-        if((rv = nng_dialer_setopt_int(tmpd,NNG_OPT_INTERFACE_BW,0))!=0){
+        if((rv = nng_dialer_set_int(tmpd,NNG_OPT_INTERFACE_BW,0))!=0){
                 fatal("nng_dialer set INTERFACE_BW", rv);
         }
-        if((rv = nng_dialer_setopt_string(tmpd,NNG_OPT_TCP_BINDTODEVICE,"wlan0"))!=0){
+        /*if((rv = nng_dialer_set_string(tmpd,NNG_OPT_TCP_BINDTODEVICE,"eth0"))!=0){
                 fatal("nng_dialer_set TCP BINDTODEVICE", rv);
-        }
+        }*/
         if((rv=nng_dialer_start(tmpd,0))!=0){
                 fatal("nng_dialer_start", rv);
         }
         char* check_devicename;
-        if((rv=nng_dialer_getopt_string(tmpd,NNG_OPT_TCP_BINDTODEVICE,&check_devicename))!=0){
-                fatal("nng_dialer_getopt_string", rv);
+        if((rv=nng_dialer_get_string(tmpd,NNG_OPT_TCP_BINDTODEVICE,&check_devicename))!=0){
+                fatal("nng_dialer_get_string", rv);
         }
         printf("the first interface is:%s\n",check_devicename);
 
@@ -85,20 +85,21 @@ client(const char *url, const char *msecstr, const char* numstr)
         if ((rv = nng_dialer_create(&tmpd1,sock, url)) != 0) {
                 fatal("nng_dialer_create", rv);
         }
-        if((rv = nng_dialer_setopt_int(tmpd1,NNG_OPT_INTERFACE_DELAY,0))!=0){
+        if((rv = nng_dialer_set_int(tmpd1,NNG_OPT_INTERFACE_DELAY,0))!=0){
                 fatal("nng_dialer set INTERFACE_DELAY", rv);
         }
-        if((rv = nng_dialer_setopt_int(tmpd1,NNG_OPT_INTERFACE_BW,5))!=0){
+        if((rv = nng_dialer_set_int(tmpd1,NNG_OPT_INTERFACE_BW,4))!=0){
                 fatal("nng_dialer set INTERFACE_BW", rv);
         }
-        if((rv = nng_dialer_setopt_string(tmpd1,NNG_OPT_TCP_BINDTODEVICE,"wlan0"))!=0){
+	/*
+        if((rv = nng_dialer_set_string(tmpd1,NNG_OPT_TCP_BINDTODEVICE,"wlan0"))!=0){
                 fatal("nng_dialer_set TCP BINDTODEVICE", rv);
-        }
+        }*/
         if((rv=nng_dialer_start(tmpd1,0))!=0){
                 fatal("nng_dialer_start", rv);
         }
-        if((rv=nng_dialer_getopt_string(tmpd1,NNG_OPT_TCP_BINDTODEVICE,&check_devicename))!=0){
-                fatal("nng_dialer_getopt_string", rv);
+        if((rv=nng_dialer_get_string(tmpd1,NNG_OPT_TCP_BINDTODEVICE,&check_devicename))!=0){
+                fatal("nng_dialer_get_string", rv);
         }
         printf("the second interface is:%s\n",check_devicename);
 	unsigned count;
@@ -137,6 +138,7 @@ client(const char *url, const char *msecstr, const char* numstr)
 			fatal("nng_msg_append_u32", rv);
 		}
 
+		printf("client sendmsg\n");
 		if ((rv = nng_sendmsg(sock, msg, 0)) != 0) {
 			fatal("nng_send", rv);
 		}// nng_sendmsg takes the ownership
