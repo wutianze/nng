@@ -17,10 +17,10 @@ extern "C" {
 
 NNG_DECL int nng_mixclient_open(nng_socket *);
 
-#define NNG_MIX_SELF 0x80
-#define NNG_MIX_PEER 0x81
-#define NNG_MIX_SELF_NAME "mixclient"
-#define NNG_MIX_PEER_NAME "mixserver"
+#define NNG_MIXCLIENT_SELF 0x80
+#define NNG_MIXCLIENT_PEER 0x81
+#define NNG_MIXCLIENT_SELF_NAME "mixclient"
+#define NNG_MIXCLIENT_PEER_NAME "mixserver"
 
 #ifdef __cplusplus
 }
