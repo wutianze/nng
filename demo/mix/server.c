@@ -75,7 +75,6 @@ server_cb(void *arg)
 	switch (work->state) {
 	case INIT:
 		work->state = RECV;
-		printf("server start recv aio.\n");
 		nng_recv_aio(work->sock, work->aio);
 		break;
 	case RECV:
@@ -92,7 +91,6 @@ server_cb(void *arg)
 			nng_recv_aio(work->sock, work->aio);
 			return;
 		}
-		printf("server msg get\n");
 		uint8_t urgent_level = 0;
 		uint8_t used_send_policy = 0;
 		nng_msg_header_trim_u8(msg,&urgent_level);

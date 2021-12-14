@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 ADDR=tcp://192.168.3.101:8899
-CLIENT_COUNT=1
+CLIENT_COUNT=10
 MSG_COUNT=10
 
 i=0

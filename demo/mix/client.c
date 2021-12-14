@@ -79,7 +79,6 @@ client(const char *url, const char *msecstr, const char* numstr)
                 fatal("nng_dialer_get_string", rv);
         }
         printf("the first interface is:%s\n",check_devicename);
-/*
         //second dialer
         nng_dialer tmpd1;
         if ((rv = nng_dialer_create(&tmpd1,sock, url)) != 0) {
@@ -100,7 +99,7 @@ client(const char *url, const char *msecstr, const char* numstr)
         if((rv=nng_dialer_get_string(tmpd1,NNG_OPT_TCP_BINDTODEVICE,&check_devicename))!=0){
                 fatal("nng_dialer_get_string", rv);
         }
-        printf("the second interface is:%s\n",check_devicename);*/
+        printf("the second interface is:%s\n",check_devicename);
 	unsigned count;
 	for(count=0;count<num;count++){
 		start = nng_clock();
@@ -137,12 +136,10 @@ client(const char *url, const char *msecstr, const char* numstr)
 			fatal("nng_msg_append_u32", rv);
 		}
 
-		printf("client sendmsg\n");
 		if ((rv = nng_sendmsg(sock, msg, 0)) != 0) {
 			fatal("nng_send", rv);
 		}// nng_sendmsg takes the ownership
 
-		printf("client sendmsg finished\n");
 		while ((rv = nng_recvmsg(sock, &msg, NNG_FLAG_NONBLOCK)) != 0) {
 			nng_msleep(100);
 			//fatal("nng_recvmsg", rv);
