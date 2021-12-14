@@ -492,7 +492,7 @@ mixserver_sock_send(void *arg, nni_aio *aio)
 	}
 	nni_mtx_unlock(&s->mtx);
 	nni_aio_set_msg(aio, NULL);
-	nng_aio_finish(aio,0,len);
+	nni_aio_finish(aio,0,len);
 	return;
 }
 
