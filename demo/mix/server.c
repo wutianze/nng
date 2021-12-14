@@ -33,7 +33,7 @@
 #include <time.h>
 
 #include <nng/nng.h>
-#include <nng/protocol/mix0/mix.h>
+#include <nng/protocol/mix0/mixserver.h>
 #include <nng/supplemental/util/platform.h>
 
 // Parallel is the maximum number of outstanding requests we can handle.
@@ -44,7 +44,7 @@
 // descriptors if you set this too high. (If not for that limit, this could
 // be set in the thousands, each context consumes a couple of KB.)
 #ifndef PARALLEL
-#define PARALLEL 16
+#define PARALLEL 4
 #endif
 
 // The server keeps a list of work items, sorted by expiration time,
@@ -156,7 +156,7 @@ server(const char *url)
 	int          i;
 
 	/*  Create the socket. */
-	rv = nng_mix_open(&sock);
+	rv = nng_mixserver_open(&sock);
 	if (rv != 0) {
 		fatal("nng_mix_open", rv);
 	}

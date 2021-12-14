@@ -11,7 +11,7 @@ cmake_minimum_required (VERSION 2.8.12)
 
 project(nng-mixdemo)
 
-set(PARALLEL 16 CACHE STRING "Parallelism (min 4, max 1000)")
+set(PARALLEL 4 CACHE STRING "Parallelism (min 4, max 1000)")
 
 # Call this from your own project's makefile.
 find_package(nng CONFIG REQUIRED)

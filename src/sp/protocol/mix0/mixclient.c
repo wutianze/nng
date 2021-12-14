@@ -433,18 +433,22 @@ mixclient_pipe_recv_cb(void *arg)
 	// Store the pipe ID.
 	nni_msg_set_pipe(msg, nni_pipe_id(p->pipe));
 
-	// If the message is missing the xxx header, scrap it.
+	// msg header from mixserver has two uint8
 	if (nni_msg_len(msg) < sizeof(uint16_t)) {
 		BUMP_STAT(&s->stat_rx_malformed);
 		nni_msg_free(msg);
 		nni_pipe_close(pipe);
 		return;
 	}
-	uint8_t urgency_level = nni_msg_peek_u8(msg);
-	uint8_t send_policy_code = nni_msg_chop_u8(msg);
+	uint8_t urgency_level = nni_msg_trim_u8(msg);
+	uint8_t send_policy_code = nni_msg_trim_u8(msg);
+	//move headers to their place
+	nni_msg_header_append_u8(msg,urgency_level);
+	nni_msg_header_append_u8(msg,send_policy_code);
+
+	// we check if more val need to be moved	
 	switch(send_policy_code){
 		case NNG_SENDPOLICY_RAW:{
-			nni_msg_header_append_u8(msg,send_policy_code);
 			break;
 		}
 		case NNG_SENDPOLICY_SAMPLE:{
@@ -455,12 +459,11 @@ mixclient_pipe_recv_cb(void *arg)
 			//TODO
 			break;
 		}
-		//different from send, here, wrong code means err
-		//and we won't get the following content
+		//wrong code means err and we won't get the following content
 		default:{
 			BUMP_STAT(&s->stat_rx_malformed);
 			nni_msg_free(msg);
-			nni_pipe_close(pipe);
+			nni_pipe_close(pipe);// recv more or just close?
 			return;
 		}
 	}
@@ -542,7 +545,7 @@ mixclient_sock_get_cb(void *arg)
 		}
 		//uint8_t urgency_level = nni_msg_header_peek_u8(msg);
 		uint8_t nature_chosen = nni_msg_header_chop_u8(msg);
-		if(nni_msg_header_append_u8(msg, NNG_SENDPOLICY_RAW) != 0){// TODO int -> uint8
+		if(nni_msg_header_append_u8(msg, NNG_SENDPOLICY_RAW) != 0){
 			goto send_fail;
 		}
 		if(id != 0){
@@ -673,19 +676,20 @@ mixclient_sock_recv(void *arg, nni_aio *aio)
 
 	//wait in the specified msgq
 	switch(s->recv_policy){
-		case NNG_RECVPOLICY_URGENT:{
-			nni_msgq_aio_get(s->urq_urgent,aio);
-			break;
-		}
 		case NNG_RECVPOLICY_NORMAL:{
 			nni_msgq_aio_get(s->urq_normal,aio);
 			break;
 		}
-		default:{
+		case NNG_RECVPOLICY_UNIMPORTANT:{
 			nni_msgq_aio_get(s->urq_unimportant,aio);
 			break;
 		}
+		default:{
+			nni_msgq_aio_get(s->urq_urgent,aio);
+			break;
+		}
 	}
+	return;
 }
 
 static int

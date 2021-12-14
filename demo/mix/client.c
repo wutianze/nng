@@ -26,7 +26,7 @@
 #include <time.h>
 
 #include <nng/nng.h>
-#include <nng/protocol/mix0/mix.h>
+#include <nng/protocol/mix0/mixclient.h>
 #include <nng/supplemental/util/platform.h>
 
 void
@@ -51,7 +51,7 @@ client(const char *url, const char *msecstr, const char* numstr)
 	msec = atoi(msecstr);
 	num = atoi(numstr);
 
-	if ((rv = nng_mix_open(&sock)) != 0) {
+	if ((rv = nng_mixclient_open(&sock)) != 0) {
 		fatal("nng_mix_open", rv);
 	}
 	
@@ -68,10 +68,9 @@ client(const char *url, const char *msecstr, const char* numstr)
         if((rv = nng_dialer_set_int(tmpd,NNG_OPT_INTERFACE_BW,0))!=0){
                 fatal("nng_dialer set INTERFACE_BW", rv);
         }
-	/*
         if((rv = nng_dialer_set_string(tmpd,NNG_OPT_TCP_BINDTODEVICE,"eth0"))!=0){
                 fatal("nng_dialer_set TCP BINDTODEVICE", rv);
-        }*/
+        }
         if((rv=nng_dialer_start(tmpd,0))!=0){
                 fatal("nng_dialer_start", rv);
         }

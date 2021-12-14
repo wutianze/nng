@@ -379,18 +379,19 @@ mixserver_pipe_recv_cb(void *arg)
 	// Store the pipe ID.
 	nni_msg_set_pipe(msg, nni_pipe_id(p->pipe));
 
-	// If the message is missing the hop count header, scrap it.
 	if (nni_msg_len(msg) < sizeof(uint16_t)) {
 		BUMP_STAT(&s->stat_rx_malformed);
 		nni_msg_free(msg);
 		nni_pipe_close(pipe);
 		return;
 	}
-	uint8_t urgency_level = nni_msg_peek_u8(msg);
-	uint8_t send_policy_code = nni_msg_chop_u8(msg);
+	uint8_t urgency_level = nni_msg_trim_u8(msg);
+	uint8_t send_policy_code = nni_msg_trim_u8(msg);
+	nni_msg_header_append_u8(msg,urgency_level);
+	nni_msg_header_append_u8(msg,send_policy_code);
+
 	switch(send_policy_code){
 		case NNG_SENDPOLICY_RAW:{
-			nni_msg_header_append_u8(msg,send_policy_code);
 			break;
 		}
 		case NNG_SENDPOLICY_SAMPLE:{
@@ -401,8 +402,7 @@ mixserver_pipe_recv_cb(void *arg)
 			//TODO
 			break;
 		}
-		//different from send, here, wrong code means err
-		//and we won't get the following content
+		//wrong code means err and we won't get the following content
 		default:{
 			BUMP_STAT(&s->stat_rx_malformed);
 			nni_msg_free(msg);
@@ -431,39 +431,6 @@ mixserver_pipe_recv_cb(void *arg)
 	}
 }
 
-static int
-tryput_in_pipe_list(nni_list*list_pipe, nni_msg*msg){
-	int rv = 0;
-	mixserver_pipe*exist_pipe;
-	NNI_LIST_FOREACH(list_pipe,exist_pipe){
-		if((rv = nni_msgq_tryput(exist_pipe->send_queue,msg))==0){
-			return 0;
-		}else{
-			return rv;
-		}
-	}
-	return NNG_EAGAIN;
-}
-
-static void
-choose_nature_list(uint8_t nature, mixserver_sock*s,nni_list**chosen_list){
-	switch(nature){
-			case NNG_MSG_INTERFACE_DELAY:
-			*chosen_list = &s->delay_list;
-			break;
-			case NNG_MSG_INTERFACE_BW:
-			*chosen_list = &s->bw_list;
-			break;
-			case NNG_MSG_INTERFACE_RELIABLE:
-			*chosen_list = &s->reliable_list;
-			break;
-			//Other msgs use the safest pipe
-			default:	
-			*chosen_list = &s->safe_list;
-	}
-	return;
-}
-
 static void
 mixserver_sock_get_cb(void *arg)
 {
@@ -479,15 +446,14 @@ mixserver_sock_get_cb(void *arg)
 	nni_aio_set_msg(&s->aio_get, NULL);
 
 	uint32_t id = nni_msg_get_pipe(msg); 
-	if(nni_msg_header_len(msg) != sizeof(uint16_t)){
+	//mixserver only use RAW mode and must specify a pipe_id
+	//but the msg header contain the initial msg header from client
+	//to help client know what this response is
+	if(nni_msg_header_len(msg) < sizeof(uint16_t)){
 		BUMP_STAT(&s->stat_tx_malformed);
 		goto send_fail;
 	}
-	//uint8_t urgency_level = nni_msg_header_peek_u8(msg);
-	uint8_t nature_chosen = nni_msg_header_chop_u8(msg);
-	if(nni_msg_header_append_u8(msg, NNG_SENDPOLICY_RAW) != 0){// TODO int -> uint8
-		goto send_fail;
-	}
+
 	if(id != 0){
 		nni_mtx_lock(&s->mtx);
 		mixserver_pipe *p = nni_id_get(&s->pipes,id);
@@ -598,21 +564,21 @@ mixserver_sock_recv(void *arg, nni_aio *aio)
 		return;
 	}
 
-	//wait in the specified msgq
 	switch(s->recv_policy){
-		case NNG_RECVPOLICY_URGENT:{
-			nni_msgq_aio_get(s->urq_urgent,aio);
-			break;
-		}
 		case NNG_RECVPOLICY_NORMAL:{
 			nni_msgq_aio_get(s->urq_normal,aio);
 			break;
 		}
-		default:{
+		case NNG_RECVPOLICY_UNIMPORTANT:{
 			nni_msgq_aio_get(s->urq_unimportant,aio);
 			break;
 		}
+		default:{
+			nni_msgq_aio_get(s->urq_urgent,aio);
+			break;
+		}
 	}
+	return;
 }
 
 static int
