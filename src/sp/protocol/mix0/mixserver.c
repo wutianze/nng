@@ -70,7 +70,6 @@ struct mixserver_sock {
 	nni_mtx        mtx;	
 	nni_id_map     pipes;
 	bool           started;
-	nni_aio        aio_get;
 
 	//policy related
 	int            recv_policy;
@@ -100,7 +99,6 @@ mixserver_sock_fini(void *arg)
 {
 	mixserver_sock *s = arg;
 
-	nni_aio_fini(&s->aio_get);
 	nni_id_map_fini(&s->pipes);
 	nni_msgq_fini(s->urq_urgent);
 	nni_msgq_fini(s->urq_normal);
@@ -128,7 +126,6 @@ static void
 mixserver_sock_close(void *arg)
 {
 	mixserver_sock *s = arg;
-	nni_aio_close(&s->aio_get);
 	nni_msgq_close(s->urq_urgent);
 	nni_msgq_close(s->urq_normal);
 	nni_msgq_close(s->urq_unimportant);
@@ -144,8 +141,6 @@ mixserver_sock_init(void *arg, nni_sock *sock)
 
 	// Raw mode uses this.
 	nni_mtx_init(&s->mtx);
-
-	nni_aio_init(&s->aio_get, mixserver_sock_get_cb, s);
 
 #ifdef NNG_ENABLE_STATS
 	static const nni_stat_info mixserver_info = {
@@ -198,7 +193,6 @@ mixserver_sock_init(void *arg, nni_sock *sock)
 #endif
 
 	int rv;
-	s->uwq = nni_sock_sendq(sock);
 	//give server more buffer
 	if(((rv = nni_msgq_init(&s->urq_urgent,8)) != 0) || 
 	((rv = nni_msgq_init(&s->urq_normal,8)) != 0) ||
@@ -513,8 +507,40 @@ mixserver_sock_send(void *arg, nni_aio *aio)
 {
 	mixserver_sock *s = arg;
 
-	nni_sock_bump_tx(s->sock, nni_msg_len(nni_aio_get_msg(aio)));
-	nni_msgq_aio_put(s->uwq, aio);
+	nni_msg *msg= nni_aio_get_msg(aio);
+	size_t len = nni_msg_len(msg);
+	nni_sock_bump_tx(s->sock, len);
+
+	if (nni_aio_begin(aio) != 0) {
+		return;
+	}
+
+	uint32_t id = nni_msg_get_pipe(msg); 
+	if(id != 0){
+		//mixserver only use RAW mode and must specify a pipe_id
+		//but the msg header contain the initial msg header from client
+		//to help client know what this response is
+		if(nni_msg_header_len(msg) < sizeof(uint16_t)){
+			BUMP_STAT(&s->stat_tx_malformed);
+			nni_aio_finish_error(aio,NNG_EINVAL);//NNG_EINVAL maybe not so clear
+			return;
+		}
+		nni_mtx_lock(&s->mtx);
+		mixserver_pipe *p = nni_id_get(&s->pipes,id);
+		if((p == NULL) || nni_msgq_tryput(p->send_queue,msg) != 0){
+			BUMP_STAT(&s->stat_tx_drop);
+			nni_mtx_unlock(&s->mtx);
+			nni_msgq_aio_put(p->send_queue,aio);
+			return;
+		}
+	}else{
+		nni_aio_finish_error(aio,NNG_EINVAL);//NNG_EINVAL maybe not so clear
+		return;
+	}
+	nni_mtx_unlock(&s->mtx);
+	nni_aio_set_msg(aio, NULL);
+	nng_aio_finish(aio,0,len);
+	return;
 }
 
 static void
