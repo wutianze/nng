@@ -46,7 +46,6 @@ bool poll_fd(int fd){
 typedef struct mixclient_pipe mixclient_pipe;
 typedef struct mixclient_sock mixclient_sock;
 
-static void mixclient_sock_get_cb(void *);
 static void mixclient_pipe_send_cb(void *);
 static void mixclient_pipe_recv_cb(void *);
 static void mixclient_pipe_get_cb(void *);
