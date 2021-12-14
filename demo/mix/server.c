@@ -103,6 +103,8 @@ server_cb(void *arg)
 				break;
 			}
 		}
+		nng_msg_header_insert_u8(msg,used_send_policy);
+		nng_msg_header_insert_u8(msg,urgent_level);
 		work->msg   = msg;
 		work->state = WAIT;
 		//do something here
