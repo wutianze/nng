@@ -84,7 +84,6 @@ struct mixclient_sock {
 	nni_list       bw_list;
 	nni_list       reliable_list;
 	nni_list       safe_list;
-	bool           started;
 
 	//policy related
 	int            recv_policy;
@@ -366,10 +365,6 @@ mixclient_pipe_start(void *arg)
 		return rv;
 	}
 
-	if (!s->started) {
-		nni_msgq_aio_get(s->uwq, &s->aio_get);
-	}
-	s->started = true;
 	nni_mtx_unlock(&s->mtx);
 
 	// Schedule a get.  In mixclientamorous mode we get on the per pipe

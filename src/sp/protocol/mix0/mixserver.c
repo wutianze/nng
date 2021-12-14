@@ -69,7 +69,6 @@ struct mixserver_sock {
 	// for pipe close&start will make changes to them
 	nni_mtx        mtx;	
 	nni_id_map     pipes;
-	bool           started;
 
 	//policy related
 	int            recv_policy;
@@ -305,10 +304,6 @@ mixserver_pipe_start(void *arg)
 		return (rv);
 	}
 
-	if (!s->started) {
-		nni_msgq_aio_get(s->uwq, &s->aio_get);
-	}
-	s->started = true;
 	nni_mtx_unlock(&s->mtx);
 
 	// Schedule a get.  In mixserveramorous mode we get on the per pipe
@@ -411,48 +406,6 @@ mixserver_pipe_recv_cb(void *arg)
 			nni_msgq_aio_put(s->urq_normal, &p->aio_put);
 		}
 	}
-}
-
-static void
-mixserver_sock_get_cb(void *arg)
-{
-	mixserver_sock *s = arg;
-	nni_msg *       msg;
-
-	if (nni_aio_result(&s->aio_get) != 0) {
-		// Socket closing...
-		return;
-	}
-
-	msg = nni_aio_get_msg(&s->aio_get);
-	nni_aio_set_msg(&s->aio_get, NULL);
-
-	uint32_t id = nni_msg_get_pipe(msg); 
-	//mixserver only use RAW mode and must specify a pipe_id
-	//but the msg header contain the initial msg header from client
-	//to help client know what this response is
-	if(nni_msg_header_len(msg) < sizeof(uint16_t)){
-		BUMP_STAT(&s->stat_tx_malformed);
-		goto send_fail;
-	}
-
-	if(id != 0){
-		nni_mtx_lock(&s->mtx);
-		mixserver_pipe *p = nni_id_get(&s->pipes,id);
-		if((p == NULL) || nni_msgq_tryput(p->send_queue,msg) != 0){
-			BUMP_STAT(&s->stat_tx_drop);
-			goto send_fail;
-		}
-	}else{
-		goto send_fail;
-	}
-	nni_mtx_unlock(&s->mtx);
-	nni_msgq_aio_get(s->uwq, &s->aio_get);
-	return;
-send_fail:
-	nni_mtx_unlock(&s->mtx);
-	nni_msg_free(msg);
-	return;
 }
 
 static void
