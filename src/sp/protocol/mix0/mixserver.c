@@ -52,18 +52,6 @@ static void mixserver_pipe_recv_cb(void *);
 static void mixserver_pipe_get_cb(void *);
 static void mixserver_pipe_put_cb(void *);
 static void mixserver_pipe_fini(void *);
-
-/*use func pointer will bring sync overhead
-struct mixserver_send_policy_ops{
-	int (*choose_and_send)(mixserver_sock*, nni_msg*);
-};
-struct mixserver_recv_policy_ops{
-	int (*recv_and_choose)(mixserver_sock*, nni_msg*);
-};
-
-typedef struct mixserver_send_policy_ops mixserver_send_policy_ops;
-typedef struct mixserver_recv_policy_ops mixserver_recv_policy_ops;
-*/ 
 // mixserver_sock is our per-socket protocol private structure.
 struct mixserver_sock {
 	nni_sock      *sock;
@@ -582,21 +570,6 @@ mixserver_sock_recv(void *arg, nni_aio *aio)
 }
 
 static int
-mixserver_set_send_policy(void *arg, const void *buf, size_t sz, nni_opt_type t)
-{
-	mixserver_sock *s = arg;
-
-	return (nni_copyin_int(&s->send_policy, buf, sz, -1, NNG_SENDPOLICY_DEFAULT, t));
-}
-
-static int
-mixserver_get_send_policy(void *arg, void *buf, size_t *szp, nni_opt_type t)
-{
-	mixserver_sock *s = arg;
-	return (nni_copyout_int(s->send_policy, buf, szp, t));
-}
-
-static int
 mixserver_set_recv_policy(void *arg, const void *buf, size_t sz, nni_opt_type t)
 {
 	mixserver_sock *s = arg;
@@ -621,11 +594,6 @@ static nni_proto_pipe_ops mixserver_pipe_ops = {
 };
 
 static nni_option mixserver_sock_options[] = {
-	{
-	    .o_name = NNG_OPT_MIX_SENDPOLICY,
-	    .o_get  = mixserver_get_send_policy,
-	    .o_set  = mixserver_set_send_policy,
-	},
 	{
 	    .o_name = NNG_OPT_MIX_RECVPOLICY,
 	    .o_get  = mixserver_get_recv_policy,
