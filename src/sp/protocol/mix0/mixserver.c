@@ -551,7 +551,7 @@ mixserver_sock_recv(void *arg, nni_aio *aio)
 		nni_aio_finish_msg(aio, msg);
 		return;
 	}
-
+	
 	switch(s->recv_policy){
 		case NNG_RECVPOLICY_NORMAL:{
 			nni_msgq_aio_get(s->urq_normal,aio);

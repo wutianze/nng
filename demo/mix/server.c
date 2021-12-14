@@ -80,7 +80,9 @@ server_cb(void *arg)
 		break;
 	case RECV:
 		if ((rv = nng_aio_result(work->aio)) != 0) {
-			fatal("nng_recv_aio", rv);
+			//fatal("nng_recv_aio", rv);
+			nng_recv_aio(work->sock,work->aio);//try again
+			break;
 		}
 		msg = nng_aio_get_msg(work->aio);
 		if ((rv = nng_msg_trim_u32(msg, &when)) != 0) {
@@ -141,6 +143,7 @@ alloc_work(nng_socket sock)
 	if ((rv = nng_aio_alloc(&w->aio, server_cb, w)) != 0) {
 		fatal("nng_aio_alloc", rv);
 	}
+	nng_aio_set_timeout(w->aio,100);
 	w->sock = sock;
 	w->state = INIT;
 	return (w);

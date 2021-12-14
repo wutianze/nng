@@ -143,8 +143,9 @@ client(const char *url, const char *msecstr, const char* numstr)
 		}// nng_sendmsg takes the ownership
 
 		printf("client sendmsg finished\n");
-		if ((rv = nng_recvmsg(sock, &msg, 0)) != 0) {
-			fatal("nng_recvmsg", rv);
+		while ((rv = nng_recvmsg(sock, &msg, NNG_FLAG_NONBLOCK)) != 0) {
+			nng_msleep(100);
+			//fatal("nng_recvmsg", rv);
 		}
 		end = nng_clock();
 		printf("Request took %u milliseconds.\n", (uint32_t)(end - start));
