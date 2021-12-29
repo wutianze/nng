@@ -190,7 +190,6 @@ mixserver_sock_init(void *arg, nni_sock *sock)
 	nni_stat_set_bool(&s->stat_mixserver, true);
 #endif
 
-	int rv;
 	//give server more buffer, panic if no enough memory
 	//TODO let user check before using it.
 	NNI_ASSERT(nni_msgq_init(&s->urq_urgent,8)==0);
