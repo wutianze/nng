@@ -129,7 +129,7 @@ mixserver_sock_close(void *arg)
 	nni_msgq_close(s->urq_unimportant);
 }
 
-static int
+static void
 mixserver_sock_init(void *arg, nni_sock *sock)
 {
 	mixserver_sock *s = arg;
@@ -191,13 +191,11 @@ mixserver_sock_init(void *arg, nni_sock *sock)
 #endif
 
 	int rv;
-	//give server more buffer
-	if(((rv = nni_msgq_init(&s->urq_urgent,8)) != 0) || 
-	((rv = nni_msgq_init(&s->urq_normal,8)) != 0) ||
-	((rv = nni_msgq_init(&s->urq_unimportant,8)) != 0)
-	){
-		return rv;
-	}
+	//give server more buffer, panic if no enough memory
+	//TODO let user check before using it.
+	NNI_ASSERT(nni_msgq_init(&s->urq_urgent,8)==0);
+	NNI_ASSERT(nni_msgq_init(&s->urq_normal,8)==0);
+	NNI_ASSERT(nni_msgq_init(&s->urq_unimportant,8)==0);
 	
 	/*
 	nni_pollable *p;
@@ -222,7 +220,6 @@ mixserver_sock_init(void *arg, nni_sock *sock)
 			return rv;
 		}
 	}*/
-	return (0);
 }
 
 static void
