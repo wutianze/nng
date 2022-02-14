@@ -55,6 +55,7 @@ client(const char *url, const char *msecstr, const char* numstr)
 		fatal("nng_mix_open", rv);
 	}
 	
+        printf("start here\n");
 	nng_socket_set_int(sock,NNG_OPT_MIX_SENDPOLICY,NNG_SENDPOLICY_RAW);
 
         //first dialer
@@ -62,25 +63,34 @@ client(const char *url, const char *msecstr, const char* numstr)
         if ((rv = nng_dialer_create(&tmpd,sock, url)) != 0) {
                 fatal("nng_dialer_create", rv);
         }
+        printf("start dialer\n");
         if((rv = nng_dialer_set_int(tmpd,NNG_OPT_INTERFACE_DELAY,4))!=0){
                 fatal("nng_dialer set INTERFACE_DELAY", rv);
         }
         if((rv = nng_dialer_set_int(tmpd,NNG_OPT_INTERFACE_BW,0))!=0){
                 fatal("nng_dialer set INTERFACE_BW", rv);
         }
+        printf("start bind\n");
         if((rv = nng_dialer_set_string(tmpd,NNG_OPT_TCP_BINDTODEVICE,"eth0"))!=0){
                 fatal("nng_dialer_set TCP BINDTODEVICE", rv);
         }
         if((rv=nng_dialer_start(tmpd,0))!=0){
                 fatal("nng_dialer_start", rv);
         }
+        printf("start success\n");
         char* check_devicename;
+        char* check_macaddress;
         if((rv=nng_dialer_get_string(tmpd,NNG_OPT_TCP_BINDTODEVICE,&check_devicename))!=0){
                 fatal("nng_dialer_get_string", rv);
         }
         printf("the first interface is:%s\n",check_devicename);
-        //second dialer
-        nng_dialer tmpd1;
+	/*if((rv=nng_dialer_get_string(tmpd,NNG_OPT_TCP_MACADDRESS,&check_macaddress))!=0){
+                fatal("nng_dialer_get_macaddress", rv);
+        }
+        printf("the first mac address is:%s\n",check_devicename);
+ */       
+	//second dialer
+        /*nng_dialer tmpd1;
         if ((rv = nng_dialer_create(&tmpd1,sock, url)) != 0) {
                 fatal("nng_dialer_create", rv);
         }
@@ -99,7 +109,15 @@ client(const char *url, const char *msecstr, const char* numstr)
         if((rv=nng_dialer_get_string(tmpd1,NNG_OPT_TCP_BINDTODEVICE,&check_devicename))!=0){
                 fatal("nng_dialer_get_string", rv);
         }
+	if((rv=nng_dialer_get_string(tmpd1,NNG_OPT_TCP_MACADDRESS,&check_macaddress))!=0){
+                fatal("nng_dialer_get_macaddress", rv);
+        }
         printf("the second interface is:%s\n",check_devicename);
+	if((rv=nng_dialer_get_string(tmpd,NNG_OPT_TCP_MACADDRESS,&check_macaddress))!=0){
+                fatal("nng_dialer_get_macaddress", rv);
+        }
+        printf("the second mac address is:%s\n",check_devicename);
+	*/
 	unsigned count;
 	for(count=0;count<num;count++){
 		start = nng_clock();

@@ -809,6 +809,8 @@ NNG_DECL nng_listener nng_pipe_listener(nng_pipe);
 // linux version must be later than 3.8. This is a string.
 #define NNG_OPT_TCP_BINDTODEVICE "tcp-bindtodevice"
 
+#define NNG_OPT_TCP_MACADDRESS "tcp-macaddress"
+
 // Local TCP port number.  This is used on a listener, and is intended
 // to be used after starting the listener in combination with a wildcard
 // (0) local port.  This determines the actual ephemeral port that was

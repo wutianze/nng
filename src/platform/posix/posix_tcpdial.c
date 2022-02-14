@@ -17,6 +17,11 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #include <net/if.h>
+#include <sys/ioctl.h>
+#include <netinet/if_ether.h>
+#include <linux/sockios.h>
+#include <stdio.h>
+
 
 #ifndef SOCK_CLOEXEC
 #define SOCK_CLOEXEC 0
@@ -39,6 +44,9 @@ nni_tcp_dialer_init(nni_tcp_dialer **dp)
 	d->keepalive = false;
 	d->devicename = nni_alloc(IFNAMSIZ);
 	memset(d->devicename,0,IFNAMSIZ);
+	memset(d->macaddr,0,ETH_ALEN);
+	
+
 	nni_aio_list_init(&d->connq);
 	nni_atomic_init_bool(&d->fini);
 	nni_atomic_init64(&d->ref);
@@ -240,6 +248,15 @@ nni_tcp_dial(nni_tcp_dialer *d, const nni_sockaddr *sa, nni_aio *aio)
 		    goto error;
 	}
 	
+	// get mac address
+	struct ifreq req;
+	req.ifr_hwaddr.sa_family=ARPHRD_ETHER;
+	int get_mac_err = ioctl(fd,SIOCGIFHWADDR,&req);
+	if (get_mac_err == -1){
+		goto error;
+	}
+	memcpy(d->macaddr, req.ifr_hwaddr.sa_data,ETH_ALEN);
+
 	if (connect(fd, (void *) &ss, sslen) != 0) {
 		if (errno != EINPROGRESS) {
 			rv = nni_plat_errno(errno);
@@ -350,6 +367,17 @@ tcp_dialer_get_devicename(void *arg, void *buf, size_t *szp, nni_type t)
 	nni_mtx_unlock(&d->mtx);
 	return rv;
 }
+
+static int
+tcp_dialer_get_macaddress(void *arg, void *buf, size_t *szp, nni_type t)
+{
+	nni_tcp_dialer *d = arg;
+	nni_mtx_lock(&d->mtx);
+	int rv = nni_copyout_str(d->macaddr, buf, szp, t);
+	nni_mtx_unlock(&d->mtx);
+	return rv;
+}
+
 static int
 tcp_dialer_get_locaddr(void *arg, void *buf, size_t *szp, nni_type t)
 {
@@ -432,6 +460,10 @@ static const nni_option tcp_dialer_options[] = {
 	    .o_name = NNG_OPT_TCP_BINDTODEVICE,
 	    .o_get  = tcp_dialer_get_devicename,
 	    .o_set  = tcp_dialer_set_devicename,
+	},
+	{
+	    .o_name = NNG_OPT_TCP_MACADDRESS,
+	    .o_get  = tcp_dialer_get_macaddress,
 	},
 	{
 	    .o_name = NULL,
