@@ -15,7 +15,6 @@
 #include "core/nng_impl.h"
 
 #include "platform/posix/posix_aio.h"
-#define ETH_ALEN 6
 
 struct nni_tcp_conn {
 	nng_stream      stream;
@@ -35,7 +34,7 @@ struct nni_tcp_dialer {
 	bool                    nodelay;
 	bool                    keepalive;
 	char                    *devicename;
-	unsigned char           macaddr[ETH_ALEN];
+	char                    *macaddr;
 	struct sockaddr_storage src;
 	size_t                  srclen;
 	nni_mtx                 mtx;

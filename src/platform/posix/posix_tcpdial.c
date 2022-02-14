@@ -21,7 +21,7 @@
 #include <netinet/if_ether.h>
 #include <linux/sockios.h>
 #include <stdio.h>
-
+#define ETH_ALEN 6
 
 #ifndef SOCK_CLOEXEC
 #define SOCK_CLOEXEC 0
@@ -44,6 +44,7 @@ nni_tcp_dialer_init(nni_tcp_dialer **dp)
 	d->keepalive = false;
 	d->devicename = nni_alloc(IFNAMSIZ);
 	memset(d->devicename,0,IFNAMSIZ);
+	d->macaddr = nni_alloc(ETH_ALEN);
 	memset(d->macaddr,0,ETH_ALEN);
 	
 
@@ -82,6 +83,7 @@ tcp_dialer_fini(nni_tcp_dialer *d)
 {
 	nni_mtx_fini(&d->mtx);
 	nni_free(d->devicename,0);//the second arg is unused
+	nni_free(d->macaddr,0);
 	NNI_FREE_STRUCT(d);
 }
 
@@ -249,13 +251,18 @@ nni_tcp_dial(nni_tcp_dialer *d, const nni_sockaddr *sa, nni_aio *aio)
 	}
 	
 	// get mac address
+	
 	struct ifreq req;
-	req.ifr_hwaddr.sa_family=ARPHRD_ETHER;
+	//req.ifr_hwaddr.sa_family=ARPHRD_ETHER;
+	strcpy(req.ifr_name, d->devicename);
 	int get_mac_err = ioctl(fd,SIOCGIFHWADDR,&req);
+	
 	if (get_mac_err == -1){
 		goto error;
 	}
-	memcpy(d->macaddr, req.ifr_hwaddr.sa_data,ETH_ALEN);
+	if(d->macaddr != NULL && req.ifr_addr.sa_data != NULL){
+		memcpy(d->macaddr, req.ifr_addr.sa_data,ETH_ALEN);
+	}
 
 	if (connect(fd, (void *) &ss, sslen) != 0) {
 		if (errno != EINPROGRESS) {
