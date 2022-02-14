@@ -388,11 +388,11 @@ mixserver_pipe_recv_cb(void *arg)
 	nni_aio_set_msg(&p->aio_put, msg);
 	nni_sock_bump_rx(s->sock, len);
 	switch(urgency_level){
-		case NNG_RECVPOLICY_URGENT:{
+		case NNG_MSG_URGENT:{
 			nni_msgq_aio_put(s->urq_urgent, &p->aio_put);
 			break;
 		}
-		case NNG_RECVPOLICY_UNIMPORTANT:{
+		case NNG_MSG_UNIMPORTANT:{
 			nni_msgq_aio_put(s->urq_unimportant, &p->aio_put);
 			break;
 		}

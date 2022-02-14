@@ -71,7 +71,7 @@ client(const char *url, const char *msecstr, const char* numstr)
                 fatal("nng_dialer set INTERFACE_BW", rv);
         }
         printf("start bind\n");
-        if((rv = nng_dialer_set_string(tmpd,NNG_OPT_TCP_BINDTODEVICE,"eth0"))!=0){
+        if((rv = nng_dialer_set_string(tmpd,NNG_OPT_TCP_BINDTODEVICE,"eno3"))!=0){
                 fatal("nng_dialer_set TCP BINDTODEVICE", rv);
         }
         if((rv=nng_dialer_start(tmpd,0))!=0){
@@ -79,16 +79,16 @@ client(const char *url, const char *msecstr, const char* numstr)
         }
         printf("start success\n");
         char* check_devicename;
-        char* check_macaddress;
+	size_t macaddr_len = 6;
+        unsigned char check_macaddress[10]={0};
         if((rv=nng_dialer_get_string(tmpd,NNG_OPT_TCP_BINDTODEVICE,&check_devicename))!=0){
                 fatal("nng_dialer_get_string", rv);
         }
         printf("the first interface is:%s\n",check_devicename);
-	/*if((rv=nng_dialer_get_string(tmpd,NNG_OPT_TCP_MACADDRESS,&check_macaddress))!=0){
+	if((rv=nng_dialer_get(tmpd,NNG_OPT_TCP_MACADDRESS,check_macaddress,&macaddr_len))!=0){
                 fatal("nng_dialer_get_macaddress", rv);
         }
-        printf("the first mac address is:%s\n",check_devicename);
- */       
+        printf("the first mac address is:%02x%02x%02x%02x%02x%02x\n",check_macaddress[0],check_macaddress[1],check_macaddress[2],check_macaddress[3],check_macaddress[4],check_macaddress[5]);
 	//second dialer
         /*nng_dialer tmpd1;
         if ((rv = nng_dialer_create(&tmpd1,sock, url)) != 0) {
@@ -126,28 +126,20 @@ client(const char *url, const char *msecstr, const char* numstr)
 			fatal("nng_msg_alloc", rv);
 		}
 		if(count % 2 == 0){
-			if ((rv = nng_msg_header_append_u8(msg,NNG_RECVPOLICY_NORMAL)) != 0) {
+			if ((rv = nng_msg_header_append_u8(msg,NNG_MSG_NORMAL)) != 0) {
 		                fatal("nng_msg_header_append_u8", rv);
 		        }
 		}else{
-			if ((rv = nng_msg_header_append_u8(msg,NNG_RECVPOLICY_URGENT)) != 0) {
+			if ((rv = nng_msg_header_append_u8(msg,NNG_MSG_URGENT)) != 0) {
 		                fatal("nng_msg_header_append_u8", rv);
 		        }
 		}
 		
-		if(count % 3 == 0){
-			if ((rv = nng_msg_header_append_u8(msg,NNG_MSG_INTERFACE_DELAY)) != 0) {
-		                fatal("nng_msg_header_append_u8", rv);
-		        }
-		}else if(count %3 == 1){
-			if ((rv = nng_msg_header_append_u8(msg,NNG_MSG_INTERFACE_BW)) != 0) {
-		                fatal("nng_msg_header_append_u8", rv);
-		        }
-		}else{
-			if ((rv = nng_msg_header_append_u8(msg,NNG_MSG_INTERFACE_RELIABLE)) != 0) {
-		                fatal("nng_msg_header_append_u8", rv);
-		        }
+		
+		if ((rv = nng_msg_header_append_u8(msg,NNG_SENDPOLICY_RAW)) != 0) {
+		        fatal("nng_msg_header_append_u8", rv);
 		}
+		
 
 
 		if ((rv = nng_msg_append_u32(msg, msec)) != 0) {

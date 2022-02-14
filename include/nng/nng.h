@@ -715,10 +715,10 @@ NNG_DECL nng_listener nng_pipe_listener(nng_pipe);
 #define NNG_OPT_INTERFACE_SAFE "interface-safe"
 
 //used in mix raw mode, carried by msg header
-#define NNG_MSG_INTERFACE_DELAY 0
-#define NNG_MSG_INTERFACE_BW 1
-#define NNG_MSG_INTERFACE_RELIABLE 2
-#define NNG_MSG_INTERFACE_SAFE 3
+#define NNG_MIX_RAW_DELAY 0
+#define NNG_MIX_RAW_BW 1
+#define NNG_MIX_RAW_RELIABLE 2
+#define NNG_MIX_RAW_SAFE 3
 
 #define NNG_INTERFACE_NATURE_MAX 4
 #define NNG_INTERFACE_NATURE_MIN 0
@@ -727,10 +727,10 @@ NNG_DECL nng_listener nng_pipe_listener(nng_pipe);
 #define NNG_SENDPOLICY_RAW 0 // user decides which interface to use
 #define NNG_SENDPOLICY_SAMPLE 1 //sampling the msg and the sampled msg has high priority
 #define NNG_SENDPOLICY_DEFAULT 2 // sock decides which interface to use based on the msg's properties
-// recv_policy defined in protocol mix
-#define NNG_RECVPOLICY_URGENT 0 
-#define NNG_RECVPOLICY_NORMAL 1
-#define NNG_RECVPOLICY_UNIMPORTANT 2
+// urgent level of msg
+#define NNG_MSG_URGENT 0 
+#define NNG_MSG_NORMAL 1
+#define NNG_MSG_UNIMPORTANT 2
 
 // TLS options are only used when the underlying transport supports TLS.
 

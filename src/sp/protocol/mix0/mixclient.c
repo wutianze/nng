@@ -460,11 +460,11 @@ mixclient_pipe_recv_cb(void *arg)
 	nni_aio_set_msg(&p->aio_put, msg);
 	nni_sock_bump_rx(s->sock, len);
 	switch(urgency_level){
-		case NNG_RECVPOLICY_URGENT:{
+		case NNG_MSG_URGENT:{
 			nni_msgq_aio_put(s->urq_urgent, &p->aio_put);
 			break;
 		}
-		case NNG_RECVPOLICY_UNIMPORTANT:{
+		case NNG_MSG_UNIMPORTANT:{
 			nni_msgq_aio_put(s->urq_unimportant, &p->aio_put);
 			break;
 		}
@@ -493,13 +493,13 @@ tryput_in_pipe_list(nni_list*list_pipe, nni_msg*msg){
 static mixclient_pipe*
 choose_nature_list(uint8_t nature, mixclient_sock*s,nni_list**chosen_list){
 	switch(nature){
-			case NNG_MSG_INTERFACE_DELAY:
+			case NNG_MIX_RAW_DELAY:
 			*chosen_list = &s->delay_list;
 			break;
-			case NNG_MSG_INTERFACE_BW:
+			case NNG_MIX_RAW_BW:
 			*chosen_list = &s->bw_list;
 			break;
-			case NNG_MSG_INTERFACE_RELIABLE:
+			case NNG_MIX_RAW_RELIABLE:
 			*chosen_list = &s->reliable_list;
 			break;
 			//Other msgs use the safest pipe

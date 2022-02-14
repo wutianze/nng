@@ -380,7 +380,7 @@ tcp_dialer_get_macaddress(void *arg, void *buf, size_t *szp, nni_type t)
 {
 	nni_tcp_dialer *d = arg;
 	nni_mtx_lock(&d->mtx);
-	int rv = nni_copyout_str(d->macaddr, buf, szp, t);
+	int rv = nni_copyout(d->macaddr, ETH_ALEN, buf, szp);
 	nni_mtx_unlock(&d->mtx);
 	return rv;
 }
