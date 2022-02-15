@@ -85,8 +85,8 @@ struct mixclient_sock {
 	nni_list       safe_list;
 
 	//policy related
-	int            recv_policy;
-	int            send_policy;
+	//int            recv_policy;
+	//int            send_policy;
 #ifdef NNG_ENABLE_STATS
 	nni_stat_item  stat_mixclient;
 	nni_stat_item  stat_reject_mismatch;
@@ -160,6 +160,7 @@ mixclient_sock_init(void *arg, nni_sock *sock)
 	NNI_LIST_INIT(&s->reliable_list, mixclient_pipe, node_reliable);
 	NNI_LIST_INIT(&s->safe_list, mixclient_pipe, node_safe);
 	s->sock = sock;
+	s->seq_num = 0;
 
 	// Raw mode uses this.
 	nni_mtx_init(&s->mtx);
@@ -572,27 +573,33 @@ mixclient_sock_send(void *arg, nni_aio *aio)
 		return;
 	}
 	mixclient_pipe *p;
-	switch(s->send_policy){
+	if(nni_msg_header_len(msg) < 6){
+			BUMP_STAT(&s->stat_tx_malformed);
+			goto send_fail;
+	}
+	uint8_t send_policy = nni_msg_header_peek_at_u8(msg,5);
+	switch(send_policy){
 	case NNG_SENDPOLICY_RAW:{
-		if(nni_msg_header_len(msg) != sizeof(uint16_t)){
+		if(nni_msg_header_len(msg) != 7){
 			BUMP_STAT(&s->stat_tx_malformed);
 			goto send_fail;
 		}
 		//uint8_t urgency_level = nni_msg_header_peek_u8(msg);
-		uint8_t nature_chosen = nni_msg_header_chop_u8(msg);
-		if(nni_msg_header_append_u8(msg, NNG_SENDPOLICY_RAW) != 0){
+		uint8_t nature_chosen = nni_msg_header_peek_at_u8(msg,6);
+		
+		uint32_t id = nni_msg_get_pipe(msg);
+		nni_time now = nni_clock();
+		if(nni_msg_header_insert(msg, &nni_time,8) != 0){
 			goto send_fail;
 		}
-		uint32_t id = nni_msg_get_pipe(msg); 
+		nni_mtx_lock(&s->mtx);
 		if(id != 0){
-			nni_mtx_lock(&s->mtx);
 			p = nni_id_get(&s->pipes,id);
 			if((p == NULL) || nni_msgq_tryput(p->send_queue,msg) != 0){
 				BUMP_STAT(&s->stat_tx_drop);
 				goto wait_in_queue;
 			}
 		}else{
-			nni_mtx_lock(&s->mtx);
 			// maybe we should just use aio_put instead of trying every
 			// pipe in the list?
 			nni_list* chosen_list = NULL;
@@ -720,7 +727,7 @@ static nni_proto_pipe_ops mixclient_pipe_ops = {
 };
 
 static nni_option mixclient_sock_options[] = {
-	{
+	/*{
 	    .o_name = NNG_OPT_MIX_SENDPOLICY,
 	    .o_get  = mixclient_get_send_policy,
 	    .o_set  = mixclient_set_send_policy,
@@ -729,7 +736,7 @@ static nni_option mixclient_sock_options[] = {
 	    .o_name = NNG_OPT_MIX_RECVPOLICY,
 	    .o_get  = mixclient_get_recv_policy,
 	    .o_set  = mixclient_set_recv_policy,
-	},
+	},*/
 	// terminate list
 	{
 	    .o_name = NULL,

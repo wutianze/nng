@@ -45,6 +45,7 @@ extern int     nni_msg_header_append_u8(nni_msg *, uint8_t);
 extern int     nni_msg_header_insert_u8(nni_msg *, uint8_t);
 extern uint8_t  nni_msg_header_trim_u8(nni_msg *);
 extern uint8_t      nni_msg_header_chop_u8(nni_msg *);
+extern uint32_t      nni_msg_header_chop_u32(nni_msg *);
 // Peek and poke variants just access the first uint32/uint8 in the
 // header.  This is useful when incrementing reference counts, etc.
 // It's faster than trim and append, but logically equivalent.
@@ -52,6 +53,9 @@ extern uint32_t nni_msg_header_peek_u32(nni_msg *);
 extern void     nni_msg_header_poke_u32(nni_msg *, uint32_t);
 extern uint8_t  nni_msg_header_peek_u8(nni_msg *);
 extern void     nni_msg_header_poke_u8(nni_msg *, uint8_t);
+
+extern uint32_t nni_msg_header_peek_at_u32(nni_msg *, size_t);
+extern uint8_t  nni_msg_header_peek_at_u8(nni_msg *, size_t);
 
 extern void     nni_msg_set_pipe(nni_msg *, uint32_t);
 extern uint32_t nni_msg_get_pipe(const nni_msg *);

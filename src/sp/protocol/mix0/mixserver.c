@@ -68,6 +68,8 @@ struct mixserver_sock {
 	// for pipe close&start will make changes to them
 	nni_mtx        mtx;	
 	nni_id_map     pipes;
+	
+	nni_id_map     apps;
 
 	//policy related
 	int            recv_policy;
@@ -98,6 +100,7 @@ mixserver_sock_fini(void *arg)
 	mixserver_sock *s = arg;
 
 	nni_id_map_fini(&s->pipes);
+	nni_id_map_fini(&s->apps);
 	nni_msgq_fini(s->urq_urgent);
 	nni_msgq_fini(s->urq_normal);
 	nni_msgq_fini(s->urq_unimportant);
@@ -135,6 +138,7 @@ mixserver_sock_init(void *arg, nni_sock *sock)
 	mixserver_sock *s = arg;
 
 	nni_id_map_init(&s->pipes, 0, 0, false);
+	nni_id_map_init(&s->apps, 0, 0, false);
 	s->sock = sock;
 
 	// Raw mode uses this.
@@ -351,16 +355,17 @@ mixserver_pipe_recv_cb(void *arg)
 	// Store the pipe ID.
 	nni_msg_set_pipe(msg, nni_pipe_id(p->pipe));
 
-	if (nni_msg_len(msg) < sizeof(uint16_t)) {
+	if (nni_msg_len(msg) < 16) {
 		BUMP_STAT(&s->stat_rx_malformed);
 		nni_msg_free(msg);
 		nni_pipe_close(pipe);
 		return;
 	}
-	uint8_t urgency_level = nni_msg_trim_u8(msg);
 	uint8_t send_policy_code = nni_msg_trim_u8(msg);
-	nni_msg_header_append_u8(msg,urgency_level);
-	nni_msg_header_append_u8(msg,send_policy_code);
+	uint8_t urgency_level = nni_msg_trim_u8(msg);
+	uint32_t seq_num = nni_msg_trim_u8(msg);
+
+	uint32_t app_id = nni_msg_trim_u32(msg);
 
 	switch(send_policy_code){
 		case NNG_SENDPOLICY_RAW:{

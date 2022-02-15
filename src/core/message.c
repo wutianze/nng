@@ -722,6 +722,24 @@ nni_msg_peek_u8(nni_msg *m)
 	return nni_chunk_peek_u8(&m->m_body);
 }
 
+uint32_t nni_msg_header_peek_at_u32(nni_msg *m, size_t place){
+	if(m->nni_msg_header_len < place+4){
+		nni_panic("get msg header out of range\n");
+	}
+	uint32_t val;
+	uint8_t *dst;
+	dst = (void *) m->m_header_buf + place;
+	NNI_GET32(dst, val);
+	return (val);
+}
+
+uint8_t  nni_msg_header_peek_at_u8(nni_msg *, size_t){
+	if(m->nni_msg_header_len < place+1){
+		nni_panic("get msg header out of range\n");
+	}
+	return *((uint8_t*)m->m_header_buf+place);
+}
+
 void
 nni_msg_clear(nni_msg *m)
 {
