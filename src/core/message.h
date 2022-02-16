@@ -54,6 +54,7 @@ extern void     nni_msg_header_poke_u32(nni_msg *, uint32_t);
 extern uint8_t  nni_msg_header_peek_u8(nni_msg *);
 extern void     nni_msg_header_poke_u8(nni_msg *, uint8_t);
 
+extern uint8_t  nni_msg_peek_at_u8(nni_msg *, size_t);
 extern uint32_t nni_msg_header_peek_at_u32(nni_msg *, size_t);
 extern uint8_t  nni_msg_header_peek_at_u8(nni_msg *, size_t);
 

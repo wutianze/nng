@@ -51,6 +51,8 @@ static void mixserver_pipe_recv_cb(void *);
 static void mixserver_pipe_get_cb(void *);
 static void mixserver_pipe_put_cb(void *);
 static void mixserver_pipe_fini(void *);
+static void mixserver_app_put_cb(void *);
+static void mixserver_app_get_cb(void *);
 // mixserver_sock is our per-socket protocol private structure.
 struct mixserver_sock {
 	nni_sock      *sock;
@@ -92,7 +94,35 @@ struct mixserver_pipe {
 	nni_aio         aio_recv;
 	nni_aio         aio_get;
 	nni_aio         aio_put;
+
+	// point to the app the pipe belongs to
+	// be initialized once the first msg received
+	// won't be deleted when this pipe is closed
+	// stored in the map in sock
+	mixserver_app    *app;
+
+	nni_list_node    node;
 };
+
+struct mixserver_app{
+	nni_list     plist;
+	nni_list     waq;
+	nni_lmq      rawq;
+	nni_lmq      readyq;
+	nni_aio      aio_put;
+	nni_aio      aio_get;
+}
+
+static void
+mixserver_app_init(void *arg){
+	mixserver_app *a = arg;
+	nni_aio_init(&a->aio_get,mixserver_app_get_cb,a);
+	nni_aio_init(&a->aio_put,mixserver_app_put_cb,a);
+	nni_lmq_init(&a->rawq,0);
+	nni_lmq_init(&a->readyq,0);
+	nni_aio_list_init(waq);
+	NNI_LIST_INIT(&a->plist, mixserver_pipe,node);
+}
 
 static void
 mixserver_sock_fini(void *arg)
@@ -276,6 +306,7 @@ mixserver_pipe_init(void *arg, nni_pipe *pipe, void *pair)
 
 	p->pipe = pipe;
 	p->pair = pair;
+	p->app = NULL;
 
 	return (0);
 }
@@ -333,6 +364,7 @@ mixserver_pipe_close(void *arg)
 	nni_mtx_unlock(&s->mtx);
 
 	nni_msgq_close(p->send_queue);
+	p->app_list = NULL;
 }
 
 static void
@@ -355,21 +387,16 @@ mixserver_pipe_recv_cb(void *arg)
 	// Store the pipe ID.
 	nni_msg_set_pipe(msg, nni_pipe_id(p->pipe));
 
-	if (nni_msg_len(msg) < 16) {
-		BUMP_STAT(&s->stat_rx_malformed);
-		nni_msg_free(msg);
-		nni_pipe_close(pipe);
-		return;
+	if (nni_msg_len(msg) < 14) {
+		goto msg_error;	
 	}
-	uint8_t send_policy_code = nni_msg_trim_u8(msg);
-	uint8_t urgency_level = nni_msg_trim_u8(msg);
-	uint32_t seq_num = nni_msg_trim_u8(msg);
 
-	uint32_t app_id = nni_msg_trim_u32(msg);
-
-	switch(send_policy_code){
+	//move header from body to header
+	uint8_t send_policy = nni_msg_peek_at_u8(msg,13);
+	int policy_specified_len = 0;
+	switch(send_policy){
 		case NNG_SENDPOLICY_RAW:{
-			break;
+			policy_specified_len = 1;
 		}
 		case NNG_SENDPOLICY_SAMPLE:{
 			//TODO
@@ -381,17 +408,36 @@ mixserver_pipe_recv_cb(void *arg)
 		}
 		//wrong code means err and we won't get the following content
 		default:{
-			BUMP_STAT(&s->stat_rx_malformed);
-			nni_msg_free(msg);
-			nni_pipe_close(pipe);
-			return;
+			goto msg_error;	
+		}
+	}
+	nni_msg_header_insert(msg,nni_msg_body(msg),14+policy_specified_len)
+	if(nni_msg_trim(msg,14+policy_specified_len) !=0){
+		goto msg_error;	
+	}
+	uint32_t app_id = nni_msg_header_peek_at_u32(msg,9);
+	//check if the app exists already
+	if(p->app == NULL){// not exist, create a new app
+		mixserver_app* new_app = nni_alloc(sizeof(mixserver_app));
+		if(new_app == NULL){
+			NNI_ASSERT(new_app != NULL);
+			goto msg_error;//shouldnt be msg error, but this is rarely happen
+		}
+		mixserver_app_init(new_app);
+		nni_id_set(&s->apps,app_id,new_app);
+		p->app = new_app;
+	}else{
+		if(p->app != nni_id_get(&s->apps,app_id)){
+			goto msg_error; // we dont allow app id change
 		}
 	}
 	len = nni_msg_len(msg);
 
-	// Send the message up.
+	// Send the message to map
 	nni_aio_set_msg(&p->aio_put, msg);
 	nni_sock_bump_rx(s->sock, len);
+	
+	/*
 	switch(urgency_level){
 		case NNG_MSG_URGENT:{
 			nni_msgq_aio_put(s->urq_urgent, &p->aio_put);
@@ -405,7 +451,13 @@ mixserver_pipe_recv_cb(void *arg)
 		default:{
 			nni_msgq_aio_put(s->urq_normal, &p->aio_put);
 		}
-	}
+	}*/
+	return;
+msg_error:
+	BUMP_STAT(&s->stat_rx_malformed);
+	nni_msg_free(msg);
+	nni_pipe_close(pipe);
+	return;
 }
 
 static void

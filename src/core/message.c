@@ -329,6 +329,15 @@ nni_chunk_peek_u8(nni_chunk *ch)
 	return (v);
 }
 
+static uint8_t
+nni_chunk_peek_at_u8(nni_chunk *ch, size_t place)
+{
+	uint8_t v;
+	NNI_ASSERT(ch->ch_len >= sizeof(v)+place);
+	v = *(ch->ch_ptr + place);
+	return (v);
+}
+
 void
 nni_msg_clone(nni_msg *m)
 {
@@ -720,6 +729,12 @@ uint8_t
 nni_msg_peek_u8(nni_msg *m)
 {
 	return nni_chunk_peek_u8(&m->m_body);
+}
+
+uint8_t
+nni_msg_peek_at_u8(nni_msg *m,size_t place)
+{
+	return nni_chunk_peek_at_u8(&m->m_body,place);
 }
 
 uint32_t nni_msg_header_peek_at_u32(nni_msg *m, size_t place){
