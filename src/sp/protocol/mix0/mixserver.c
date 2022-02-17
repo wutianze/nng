@@ -68,7 +68,7 @@ struct mixserver_sock {
 
 	// mtx is to protect id_map and list for pipes
 	// for pipe close&start will make changes to them
-	nni_mtx        mtx;	
+	nni_mtx        mtx;
 	nni_id_map     pipes;
 	
 	nni_id_map     apps;
@@ -107,10 +107,12 @@ struct mixserver_pipe {
 struct mixserver_app{
 	nni_list     plist;
 	nni_list     waq;
-	nni_lmq      rawq;
 	nni_lmq      readyq;
 	nni_aio      aio_put;
 	nni_aio      aio_get;
+	nni_mtx      mtx;
+	uint32_t     id;
+	bool         aio_get_ready;
 }
 
 static void
@@ -118,10 +120,10 @@ mixserver_app_init(void *arg){
 	mixserver_app *a = arg;
 	nni_aio_init(&a->aio_get,mixserver_app_get_cb,a);
 	nni_aio_init(&a->aio_put,mixserver_app_put_cb,a);
-	nni_lmq_init(&a->rawq,0);
 	nni_lmq_init(&a->readyq,0);
 	nni_aio_list_init(waq);
 	NNI_LIST_INIT(&a->plist, mixserver_pipe,node);
+	nni_mtx_init(&a->mtx);
 }
 
 static void
@@ -416,26 +418,63 @@ mixserver_pipe_recv_cb(void *arg)
 		goto msg_error;	
 	}
 	uint32_t app_id = nni_msg_header_peek_at_u32(msg,9);
+
+
 	//check if the app exists already
-	if(p->app == NULL){// not exist, create a new app
-		mixserver_app* new_app = nni_alloc(sizeof(mixserver_app));
-		if(new_app == NULL){
-			NNI_ASSERT(new_app != NULL);
-			goto msg_error;//shouldnt be msg error, but this is rarely happen
-		}
-		mixserver_app_init(new_app);
-		nni_id_set(&s->apps,app_id,new_app);
-		p->app = new_app;
-	}else{
-		if(p->app != nni_id_get(&s->apps,app_id)){
+	if(p->app != NULL){// the pipe is bind to an app already
+		if(p->app->id != app_id){
 			goto msg_error; // we dont allow app id change
 		}
+	}else{
+		nni_mtx_lock(&s->mtx);
+		mixserver_app* app_find = nni_id_get(&s->apps,app_id);
+		if(app_find == NULL){// not exist, create a new app
+			mixserver_app* new_app = nni_alloc(sizeof(mixserver_app));
+			if(new_app == NULL){
+				NNI_ASSERT(new_app != NULL);
+				goto msg_error;//shouldnt be msg error, but this is rarely happen
+			}
+			mixserver_app_init(new_app);
+			nni_id_set(&s->apps,app_id,new_app);
+			p->app = new_app;
+			new_app->id = app_id;
+		}else{//another pipe of the app has created the app
+			p->app = app_find;
+		}
+		nni_mtx_unlock(&s->mtx);
 	}
-	len = nni_msg_len(msg);
 
-	// Send the message to map
-	nni_aio_set_msg(&p->aio_put, msg);
-	nni_sock_bump_rx(s->sock, len);
+	len = nni_msg_len(msg);
+	nni_sock_bump_rx(s->sock, len);// after this, shouldnt have another msg error
+
+	nni_mtx_lock(&(p->app->mtx));
+	//check if a mix msg can be generated
+	switch(send_policy){
+		case NNG_SENDPOLICY_RAW:{
+			// we dont care about others
+			if(p->app->aio_get_ready){
+				p->app->aio_get_ready = false;
+				nni_mtx_unlock(&(p->app->mtx));
+				nni_aio_set_msg(&p->app->aio_get, msg);
+				nni_aio_finish(&p->app->aio_get,0,len);
+				nni_pipe_recv(pipe,&p->aio_recv);
+			}
+		}
+		case NNG_SENDPOLICY_SAMPLE:{
+			//TODO
+			break;
+		}
+		case NNG_SENDPOLICY_DEFAULT:{
+			//TODO
+			break;
+		}
+		//wrong code means err and we won't get the following content
+		default:{
+			goto msg_error;	
+		}
+	}
+
+
 	
 	/*
 	switch(urgency_level){

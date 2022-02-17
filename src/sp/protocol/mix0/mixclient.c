@@ -66,9 +66,9 @@ typedef struct mixclient_recv_policy_ops mixclient_recv_policy_ops;
 // mixclient_sock is our per-socket protocol private structure.
 struct mixclient_sock {
 	nni_sock      *sock;
-	nni_msgq      *urq_urgent;
-	nni_msgq      *urq_normal;
-	nni_msgq      *urq_unimportant;
+	nni_mtx       mtx_urq;
+	nni_lmq       urq;
+	nni_list      raq;
 	/* replaced by adding tryget in msgqueue.c
 	int            fd_urgent;
 	int            fd_normal;
@@ -101,7 +101,8 @@ struct mixclient_sock {
 struct mixclient_pipe {
 	nni_pipe       *pipe;
 	mixclient_sock       *pair;
-	nni_msgq       *send_queue;
+	nni_lmq         send_queue;
+	nni_list        waq;
 	nni_aio         aio_send;
 	nni_aio         aio_recv;
 	nni_aio         aio_get;
@@ -118,9 +119,8 @@ mixclient_sock_fini(void *arg)
 	mixclient_sock *s = arg;
 
 	nni_id_map_fini(&s->pipes);
-	nni_msgq_fini(s->urq_urgent);
-	nni_msgq_fini(s->urq_normal);
-	nni_msgq_fini(s->urq_unimportant);
+	nni_lmq_fini(&s->urq);
+	nni_mtx_fini(&s->mtx_urq);
 	nni_mtx_fini(&s->mtx);
 }
 
@@ -144,26 +144,36 @@ static void
 mixclient_sock_close(void *arg)
 {
 	mixclient_sock *s = arg;
-	nni_msgq_close(s->urq_urgent);
-	nni_msgq_close(s->urq_normal);
-	nni_msgq_close(s->urq_unimportant);
+	nni_aio *a;
+	nni_msg *m;
+	nni_mtx_lock(&s->mtx_urq);
+	while((a=nni_list_first(&s->raq))!=NULL){
+		nni_aio_list_remove(a);
+		nni_aio_finish_error(a,NNG_ECLOSED);
+	}
+	while(nni_lmq_get(&s->urq,&m) ==0){
+		nni_msg_free(m);
+	}
+	nni_mtx_unlock(&s->mtx_urq);
 }
 
-static int
+static void
 mixclient_sock_init(void *arg, nni_sock *sock)
 {
 	mixclient_sock *s = arg;
+
+	nni_mtx_init(&s->mtx);
+	nni_mtx_init(&s->mtx_urq);
 
 	nni_id_map_init(&s->pipes, 0, 0, false);
 	NNI_LIST_INIT(&s->delay_list, mixclient_pipe, node_delay);
 	NNI_LIST_INIT(&s->bw_list, mixclient_pipe, node_bw);
 	NNI_LIST_INIT(&s->reliable_list, mixclient_pipe, node_reliable);
 	NNI_LIST_INIT(&s->safe_list, mixclient_pipe, node_safe);
+	nni_lmq_init(&s->urq,0);
+	nni_aio_list_init(&s->raq);
 	s->sock = sock;
-	s->seq_num = 0;
 
-	// Raw mode uses this.
-	nni_mtx_init(&s->mtx);
 
 #ifdef NNG_ENABLE_STATS
 	static const nni_stat_info mixclient_info = {
@@ -215,14 +225,6 @@ mixclient_sock_init(void *arg, nni_sock *sock)
 	nni_stat_set_bool(&s->stat_mixclient, true);
 #endif
 
-	int rv;
-	if(((rv = nni_msgq_init(&s->urq_urgent,2)) != 0) || 
-	((rv = nni_msgq_init(&s->urq_normal,2)) != 0) ||
-	((rv = nni_msgq_init(&s->urq_unimportant,2)) != 0)
-	){
-		return rv;
-	}
-	
 	/*
 	nni_pollable *p;
 	if ((rv = nni_msgq_get_recvable(s->urq_urgent,&p)) != 0){
@@ -246,7 +248,6 @@ mixclient_sock_init(void *arg, nni_sock *sock)
 			return rv;
 		}
 	}*/
-	return (0);
 }
 
 static void
@@ -477,12 +478,14 @@ mixclient_pipe_recv_cb(void *arg)
 }
 
 static int
-tryput_in_pipe_list(nni_list*list_pipe, nni_msg*msg){
+tryput_in_pipe_list(nni_list*list_pipe, nni_msg*msg, int count){
+	int finished = 0;
 	int rv = 0;
 	mixclient_pipe*exist_pipe;
 	NNI_LIST_FOREACH(list_pipe,exist_pipe){
 		if((rv = nni_msgq_tryput(exist_pipe->send_queue,msg))==0){
-			return 0;
+			finished++;
+			if(finished == count)return 0;
 		}else{
 			return rv;
 		}
@@ -597,7 +600,8 @@ mixclient_sock_send(void *arg, nni_aio *aio)
 			p = nni_id_get(&s->pipes,id);
 			if((p == NULL) || nni_msgq_tryput(p->send_queue,msg) != 0){
 				BUMP_STAT(&s->stat_tx_drop);
-				goto wait_in_queue;
+				nni_mtx_unlock(&s->mtx);
+				nni_msgq_aio_put(p->send_queue,aio);
 			}
 		}else{
 			// maybe we should just use aio_put instead of trying every
@@ -606,8 +610,34 @@ mixclient_sock_send(void *arg, nni_aio *aio)
 			p = choose_nature_list(nature_chosen,s,&chosen_list);
 			if(tryput_in_pipe_list(chosen_list,msg) != 0){
 				BUMP_STAT(&s->stat_tx_drop);
-				goto wait_in_queue;
+				nni_mtx_unlock(&s->mtx);
+				nni_msgq_aio_put(p->send_queue,aio);
 			}
+		}
+		nni_mtx_unlock(&s->mtx);
+		break;
+	}
+	case NNG_SENDPOLICY_DOUBLE:{
+		if(nni_msg_header_len(msg) != 6){
+			BUMP_STAT(&s->stat_tx_malformed);
+			goto send_fail;
+		}
+	//refer to sub recv_cb, use msg_dup or msg_clone?	
+		nni_time now = nni_clock();
+		if(nni_msg_header_insert(msg, &nni_time,8) != 0){
+			goto send_fail;
+		}
+		nni_mtx_lock(&s->mtx);
+		mixclient_pipe* first_pipe = nni_list_first(&s->delay_list);
+		if(first_pipe == NULL){
+			nni_mtx_unlock(&s->mtx);
+			goto send_fail;
+		}
+		mixclient_pipe* second_pipe = nni_list_next(&s->delay_list,first_pipe);
+		if(tryput_in_pipe_list(&s->delay_list,msg) != 0){
+			BUMP_STAT(&s->stat_tx_drop);
+			nni_mtx_unlock(&s->mtx);
+			goto wait_in_queue;
 		}
 		break;
 	}
@@ -619,18 +649,12 @@ mixclient_sock_send(void *arg, nni_aio *aio)
 		break;
 	}
 	}
-	nni_mtx_unlock(&s->mtx);
 	nni_aio_set_msg(aio, NULL);
 	nni_aio_finish(aio,0,len);
 	return;
 send_fail:
 	//if fail, we dont get the msg's ownership
-	nni_mtx_unlock(&s->mtx);
 	nni_aio_finish_error(aio,NNG_EINVAL);//NNG_EINVAL maybe not so clear
-	return;
-wait_in_queue:
-	nni_mtx_unlock(&s->mtx);
-	nni_msgq_aio_put(p->send_queue,aio);
 	return;
 }
 
