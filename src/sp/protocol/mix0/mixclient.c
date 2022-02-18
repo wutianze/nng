@@ -51,6 +51,8 @@ static void mixclient_pipe_recv_cb(void *);
 static void mixclient_pipe_get_cb(void *);
 static void mixclient_pipe_put_cb(void *);
 static void mixclient_pipe_fini(void *);
+static void mixclient_pipe_send(mixclient_pipe *,nni_msg *);
+static void mixclient_send_sched(mixclient_pipe *);
 
 /*use func pointer will bring sync overhead
 struct mixclient_send_policy_ops{
@@ -82,7 +84,7 @@ struct mixclient_sock {
 	nni_list       delay_list;
 	nni_list       bw_list;
 	nni_list       reliable_list;
-	nni_list       safe_list;
+	nni_list       security_list;
 
 	//policy related
 	//int            recv_policy;
@@ -101,12 +103,13 @@ struct mixclient_sock {
 struct mixclient_pipe {
 	nni_pipe       *pipe;
 	mixclient_sock       *pair;
+	nni_mtx         mtx_send;
 	nni_lmq         send_queue;
 	nni_list        waq;
 	nni_aio         aio_send;
 	nni_aio         aio_recv;
-	nni_aio         aio_get;
-	nni_aio         aio_put;
+	bool            w_ready;
+	bool            r_ready;
 	nni_list_node   node_delay;
 	nni_list_node   node_bw;
 	nni_list_node   node_reliable;
@@ -477,6 +480,7 @@ mixclient_pipe_recv_cb(void *arg)
 	}
 }
 
+/*
 static int
 tryput_in_pipe_list(nni_list*list_pipe, nni_msg*msg, int count){
 	int finished = 0;
@@ -491,27 +495,32 @@ tryput_in_pipe_list(nni_list*list_pipe, nni_msg*msg, int count){
 		}
 	}
 	return NNG_EAGAIN;
-}
+}*/
 
 // return the first pipe in the chosen_list
 static mixclient_pipe*
-choose_nature_list(uint8_t nature, mixclient_sock*s,nni_list**chosen_list){
+pipe_from_nature_list(uint8_t nature, mixclient_sock*s){
 	switch(nature){
 			case NNG_MIX_RAW_DELAY:
-			*chosen_list = &s->delay_list;
+				if(!nni_list_empty(&s->delay_list)){
+					return nni_list_first(&s->delay_list);
+				}
 			break;
 			case NNG_MIX_RAW_BW:
-			*chosen_list = &s->bw_list;
+				if(!nni_list_empty(&s->bw_list)){
+					return nni_list_first(&s->bw_list);
+				}
 			break;
 			case NNG_MIX_RAW_RELIABLE:
-			*chosen_list = &s->reliable_list;
+				if(!nni_list_empty(&s->reliable_list)){
+					return nni_list_first(&s->reliable_list);
+				}
 			break;
 			//Other msgs use the safest pipe
 			default:	
-			*chosen_list = &s->safe_list;
-	}
-	if(!nni_list_empty(*chosen_list)){
-		return nni_list_first(*chosen_list);
+				if(!nni_list_empty(&s->security_list)){
+					return nni_list_first(&s->security_list);
+				}
 	}
 	return NULL;
 }
@@ -548,6 +557,42 @@ mixclient_pipe_get_cb(void *arg)
 	nni_pipe_send(p->pipe, &p->aio_send);
 }
 
+static void mixclient_pipe_send(mixclient_pipe *p, nni_msg *m){
+	NNI_ASSERT(!nni_msg_shared(m));
+	nni_aio_set_msg(&p->aio_send,m);
+	nni_pipe_send(p->pipe,&p->aio_send);
+	p->w_ready = false;
+}
+
+static void
+mixclient_send_sched(mixclient_pipe* p){
+	if(p == NULL)return;
+	nni_msg *m;
+	nni_aio *a;
+	size_t l = 0;
+	nni_mtx_lock(&p->mtx_send);
+	p->w_ready = true;
+	if(nni_lmq_get(&p->send_queue,&m) ==0){
+		mixclient_pipe_send(p,m);
+		if((a = nni_list_first(&p->waq))!=NULL){
+			nni_aio_list_remove(a);
+			m = nni_aio_get_msg(a);
+			l = nni_msg_len(m);
+			nni_lmq_put(&p->send_queue,m);
+		}
+	}else if((a=nni_list_first(&p->waq))!=NULL){
+		nni_aio_list_remove(a);
+		m = nni_aio_get_msg(a);
+		l = nni_msg_len(m);
+		mixclient_pipe_send(p,m);
+	}
+	nni_mtx_unlock(&p->mtx_send);
+	if(a != NULL){
+		nni_aio_set_msg(a,NULL);
+		nni_aio_finish_sync(a,0,l);
+	}
+}
+
 static void
 mixclient_pipe_send_cb(void *arg)
 {
@@ -560,13 +605,27 @@ mixclient_pipe_send_cb(void *arg)
 		return;
 	}
 
-	nni_msgq_aio_get(p->send_queue, &p->aio_get);
+	mixclient_send_sched(p);
+}
+
+static void
+mixclient_send_cancel(nni_aio *aio, void *arg, int rv)
+{
+	mixclient_pipe *p = arg;
+
+	nni_mtx_lock(&p->mtx_send);
+	if (nni_aio_list_active(aio)) {
+		nni_aio_list_remove(aio);
+		nni_aio_finish_error(aio, rv);
+	}
+	nni_mtx_unlock(&p->mtx_send);
 }
 
 static void
 mixclient_sock_send(void *arg, nni_aio *aio)
 {
 	mixclient_sock *s = arg;
+	int rv;
 
 	nni_msg *msg= nni_aio_get_msg(aio);
 	size_t len = nni_msg_len(msg);
@@ -575,7 +634,6 @@ mixclient_sock_send(void *arg, nni_aio *aio)
 	if (nni_aio_begin(aio) != 0) {
 		return;
 	}
-	mixclient_pipe *p;
 	if(nni_msg_header_len(msg) < 6){
 			BUMP_STAT(&s->stat_tx_malformed);
 			goto send_fail;
@@ -583,6 +641,7 @@ mixclient_sock_send(void *arg, nni_aio *aio)
 	uint8_t send_policy = nni_msg_header_peek_at_u8(msg,5);
 	switch(send_policy){
 	case NNG_SENDPOLICY_RAW:{
+		mixclient_pipe *p;
 		if(nni_msg_header_len(msg) != 7){
 			BUMP_STAT(&s->stat_tx_malformed);
 			goto send_fail;
@@ -597,24 +656,43 @@ mixclient_sock_send(void *arg, nni_aio *aio)
 		}
 		nni_mtx_lock(&s->mtx);
 		if(id != 0){
-			p = nni_id_get(&s->pipes,id);
-			if((p == NULL) || nni_msgq_tryput(p->send_queue,msg) != 0){
+			if((p = nni_id_get(&s->pipes,id) == NULL){
 				BUMP_STAT(&s->stat_tx_drop);
 				nni_mtx_unlock(&s->mtx);
-				nni_msgq_aio_put(p->send_queue,aio);
+				goto send_fail;
 			}
 		}else{
-			// maybe we should just use aio_put instead of trying every
-			// pipe in the list?
-			nni_list* chosen_list = NULL;
-			p = choose_nature_list(nature_chosen,s,&chosen_list);
-			if(tryput_in_pipe_list(chosen_list,msg) != 0){
+			if((p = pipe_from_nature_list(nature_chosen,s)) == NULL){
 				BUMP_STAT(&s->stat_tx_drop);
 				nni_mtx_unlock(&s->mtx);
-				nni_msgq_aio_put(p->send_queue,aio);
+				goto send_fail;
 			}
 		}
-		nni_mtx_unlock(&s->mtx);
+		nni_mtx_unlock(&s->mtx);//we find that pipe
+		nni_mtx_lock(&p->mtx_send);
+		if(p->w_ready){
+			nni_aio_set_msg(aio,NULL);
+			nni_aio_finish(aio,0,len);
+			mixclient_pipe_send(p,msg);
+			nni_mtx_unlock(&p->mtx_send);
+			return;
+		}
+
+		// queue it
+		if(nni_lmq_put(&p->send_queue,msg) == 0){
+			nni_aio_set_msg(aio,NULL);
+			nni_aio_finish(aio,0,len);
+			nni_mtx_unlock(&p->mtx_send);
+			return;
+		}
+		// let aio wait
+		if((rv = nni_aio_schedule(aio,mixclient_send_cancel,p))!=0){
+			nni_aio_finish_error(aio,rv);
+			nni_mtx_unlock(&p->mtx_send);
+			return;
+		}
+		nni_aio_list_append(&p->waq,aio);
+		nni_mtx_unlock(&p->mtx_send);
 		break;
 	}
 	case NNG_SENDPOLICY_DOUBLE:{
@@ -629,15 +707,112 @@ mixclient_sock_send(void *arg, nni_aio *aio)
 		}
 		nni_mtx_lock(&s->mtx);
 		mixclient_pipe* first_pipe = nni_list_first(&s->delay_list);
-		if(first_pipe == NULL){
+		mixclient_pipe* second_pipe = nni_list_next(&s->delay_list,first_pipe);
+		if(first_pipe == NULL || second_pipe == NULL){
 			nni_mtx_unlock(&s->mtx);
 			goto send_fail;
 		}
-		mixclient_pipe* second_pipe = nni_list_next(&s->delay_list,first_pipe);
-		if(tryput_in_pipe_list(&s->delay_list,msg) != 0){
-			BUMP_STAT(&s->stat_tx_drop);
-			nni_mtx_unlock(&s->mtx);
-			goto wait_in_queue;
+		nni_mtx_unlock(&s->mtx);
+		
+		// the first pipe send
+		nni_msg *dup_m = NULL;
+		if(nni_msg_dup(&dup_m,msg) ==0){
+			goto send_fail;
+		}
+		bool dup_m_used = false;
+		bool aio_used = false;
+		nni_mtx_lock(&first_pipe->mtx_send);
+		if(first_pipe->w_ready){
+			//use the dup_m first
+			mixclient_pipe_send(first_pipe,dup_m);
+			dup_m_used = true;
+		}else if(nni_lmq_put(&first_pipe->send_queue,dup_m) == 0){
+			dup_m_used = true;
+		}
+		if(!dup_m_used){
+			// let aio wait, we dont care if the NONBLOCK is set
+			rv = nni_aio_schedule(aio,mixclient_send_cancel,first_pipe);
+			if(rv == NNG_ECLOSED){
+				rv = NNG_WMIX;
+			}else if(rv == 0){
+				nni_aio_list_append(&first_pipe->waq,aio);
+				aio_used = true;
+			}// TIMEOUT, wont let aio wait
+			nni_mtx_unlock(&first_pipe->mtx_send);
+		}
+
+		nni_mtx_lock(&second_pipe->mtx_send);
+		if(second_pipe->w_ready){
+			if(dup_m_used){
+				nni_aio_set_msg(aio,NULL);
+				nni_aio_finish(aio,0,len);//all used means success
+				mixclient_pipe_send(second_pipe,msg);
+				nni_mtx_unlock(&second_pipe->mtx_send);
+				return;
+			}
+			mixclient_pipe_send(p,dup_m);
+			if(aio_used){
+				nni_mtx_unlock(&second_pipe->mtx_send);
+				return;
+			}
+			// must be NNG_WMIX or TIMEOUT
+			nni_aio_finish_error(aio,NNG_WMIX);
+			nni_mtx_unlock(&second_pipe->mtx_send);
+			return;
+		}
+		if(dup_m_used){
+			if(nni_lmq_put(&second_pipe->send_queue,msg) == 0){
+				nni_aio_set_msg(aio,NULL);
+				nni_aio_finish(aio,0,len);//all used means success
+				nni_mtx_unlock(&second_pipe->mtx_send);
+				return;
+			}
+			// let aio wait, we dont care if the NONBLOCK is set
+			rv = nni_aio_schedule(aio,mixclient_send_cancel,second_pipe);
+			if(rv == NNG_ECLOSED){
+				nni_aio_finish_error(aio,NNG_WMIX);
+				nni_mtx_unlock(&second_pipe->mtx_send);
+				return;
+			}else if(rv == 0){
+				nni_aio_list_append(&second_pipe->waq,aio);
+				nni_mtx_unlock(&second_pipe->mtx_send);
+				return;
+			}// TIMEOUT, wont let aio wait
+			nni_aio_finish_error(aio,NNG_WMIX);// first pipe success
+			nni_mtx_unlock(&second_pipe->mtx_send);
+			return;
+		}else{
+			if(aio_used){
+				if(nni_lmq_put(&second_pipe->send_queue,dup_m) == 0){
+					nni_mtx_unlock(&second_pipe->mtx_send);
+					return;
+				}
+				nni_aio_finish_error(aio,NNG_WMIX);// first pipe success
+				nni_mtx_unlock(&second_pipe->mtx_send);
+				return;
+			}else{//the first pipe is closed or TIMEOUT
+				nni_msg_free(dup_m);// dup_m will not be used
+				if(nni_lmq_put(&second_pipe->send_queue,msg) == 0){
+					nni_aio_set_msg(aio,NULL);
+					nni_aio_finish(aio,0,len);
+					nni_mtx_unlock(&second_pipe->mtx_send);
+					return;
+				}
+				// let aio wait
+				rv = nni_aio_schedule(aio,mixclient_send_cancel,second_pipe);
+				if(rv == NNG_ECLOSED){
+					nni_aio_finish_error(aio,rv);// both fail
+					nni_mtx_unlock(&second_pipe->mtx_send);
+					return;
+				}else if(rv == 0){
+					nni_aio_list_append(&second_pipe->waq,aio);
+					nni_mtx_unlock(&second_pipe->mtx_send);
+					return;
+				}// TIMEOUT, wont let aio wait
+				nni_aio_finish_error(aio,rv);// both fail
+				nni_mtx_unlock(&second_pipe->mtx_send);
+				return;
+			}
 		}
 		break;
 	}
@@ -649,8 +824,8 @@ mixclient_sock_send(void *arg, nni_aio *aio)
 		break;
 	}
 	}
-	nni_aio_set_msg(aio, NULL);
-	nni_aio_finish(aio,0,len);
+	//nni_aio_set_msg(aio, NULL);
+	//nni_aio_finish(aio,0,len);
 	return;
 send_fail:
 	//if fail, we dont get the msg's ownership

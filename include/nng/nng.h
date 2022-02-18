@@ -1094,6 +1094,7 @@ enum nng_errno_enum {
 	NNG_EAMBIGUOUS   = 29,
 	NNG_EBADTYPE     = 30,
 	NNG_ECONNSHUT    = 31,
+	NNG_WMIX         = 2000,
 	NNG_EINTERNAL    = 1000,
 	NNG_ESYSERR      = 0x10000000,
 	NNG_ETRANERR     = 0x20000000
