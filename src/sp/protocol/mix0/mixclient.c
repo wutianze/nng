@@ -108,6 +108,7 @@ struct mixclient_pipe {
 	nni_list        waq;
 	nni_aio         aio_send;
 	nni_aio         aio_recv;
+	nni_aio         aio_put;
 	bool            w_ready;
 	bool            r_ready;
 	nni_list_node   node_delay;
@@ -257,11 +258,11 @@ static void
 mixclient_pipe_stop(void *arg)
 {
 	mixclient_pipe *p = arg;
+	nni_mtx_lock(&p->mtx_send);
 
 	nni_aio_stop(&p->aio_send);
 	nni_aio_stop(&p->aio_recv);
 	nni_aio_stop(&p->aio_put);
-	nni_aio_stop(&p->aio_get);
 }
 
 static void
@@ -272,8 +273,6 @@ mixclient_pipe_fini(void *arg)
 	nni_aio_fini(&p->aio_send);
 	nni_aio_fini(&p->aio_recv);
 	nni_aio_fini(&p->aio_put);
-	nni_aio_fini(&p->aio_get);
-	nni_msgq_fini(p->send_queue);
 }
 
 static int
@@ -284,13 +283,7 @@ mixclient_pipe_init(void *arg, nni_pipe *pipe, void *pair)
 
 	nni_aio_init(&p->aio_send, mixclient_pipe_send_cb, p);
 	nni_aio_init(&p->aio_recv, mixclient_pipe_recv_cb, p);
-	nni_aio_init(&p->aio_get, mixclient_pipe_get_cb, p);
 	nni_aio_init(&p->aio_put, mixclient_pipe_put_cb, p);
-
-	if ((rv = nni_msgq_init(&p->send_queue, 1)) != 0) {
-		mixclient_pipe_fini(p);
-		return (rv);
-	}
 
 	/*
 	nni_pollable* tmp;
@@ -392,7 +385,6 @@ mixclient_pipe_close(void *arg)
 	nni_aio_close(&p->aio_send);
 	nni_aio_close(&p->aio_recv);
 	nni_aio_close(&p->aio_put);
-	nni_aio_close(&p->aio_get);
 
 	nni_mtx_lock(&s->mtx);
 	nni_id_remove(&s->pipes, nni_pipe_id(p->pipe));
@@ -402,7 +394,6 @@ mixclient_pipe_close(void *arg)
 	nni_list_node_remove(&p->node_safe);
 	nni_mtx_unlock(&s->mtx);
 
-	nni_msgq_close(p->send_queue);
 }
 
 static void
@@ -425,18 +416,35 @@ mixclient_pipe_recv_cb(void *arg)
 	// Store the pipe ID.
 	nni_msg_set_pipe(msg, nni_pipe_id(p->pipe));
 
-	// msg header from mixserver has two uint8
-	if (nni_msg_len(msg) < sizeof(uint16_t)) {
-		BUMP_STAT(&s->stat_rx_malformed);
-		nni_msg_free(msg);
-		nni_pipe_close(pipe);
-		return;
+	TODO
+	if (nni_msg_len(msg) < 14) {
+		goto msg_error;	
 	}
-	uint8_t urgency_level = nni_msg_trim_u8(msg);
-	uint8_t send_policy_code = nni_msg_trim_u8(msg);
-	//move headers to their place
-	nni_msg_header_append_u8(msg,urgency_level);
-	nni_msg_header_append_u8(msg,send_policy_code);
+	//move header from body to header
+	uint8_t send_policy = nni_msg_peek_at_u8(msg,13);
+	int policy_specified_len = 0;
+	switch(send_policy){
+		case NNG_SENDPOLICY_RAW:{
+			policy_specified_len = 1;
+		}
+		case NNG_SENDPOLICY_SAMPLE:{
+			//TODO
+			break;
+		}
+		case NNG_SENDPOLICY_DEFAULT:{
+			//TODO
+			break;
+		}
+		//wrong code means err and we won't get the following content
+		default:{
+			goto msg_error;	
+		}
+	}
+	nni_msg_header_insert(msg,nni_msg_body(msg),14+policy_specified_len)
+	if(nni_msg_trim(msg,14+policy_specified_len) !=0){
+		goto msg_error;	
+	}
+	uint32_t app_id = nni_msg_header_peek_at_u32(msg,9);
 
 	// we check if more val need to be moved	
 	switch(send_policy_code){
@@ -478,6 +486,11 @@ mixclient_pipe_recv_cb(void *arg)
 			nni_msgq_aio_put(s->urq_normal, &p->aio_put);
 		}
 	}
+msg_error:
+	BUMP_STAT(&s->stat_rx_malformed);
+	nni_msg_free(msg);
+	nni_pipe_close(pipe);
+	return;
 }
 
 /*
@@ -538,7 +551,7 @@ mixclient_pipe_put_cb(void *arg)
 	}
 	nni_pipe_recv(p->pipe, &p->aio_recv);
 }
-
+/*
 static void
 mixclient_pipe_get_cb(void *arg)
 {
@@ -555,7 +568,7 @@ mixclient_pipe_get_cb(void *arg)
 
 	nni_aio_set_msg(&p->aio_send, msg);
 	nni_pipe_send(p->pipe, &p->aio_send);
-}
+}*/
 
 static void mixclient_pipe_send(mixclient_pipe *p, nni_msg *m){
 	NNI_ASSERT(!nni_msg_shared(m));
@@ -885,7 +898,7 @@ mixclient_sock_recv(void *arg, nni_aio *aio)
 	}
 	return;
 }
-
+/*
 static int
 mixclient_set_send_policy(void *arg, const void *buf, size_t sz, nni_opt_type t)
 {
@@ -915,7 +928,7 @@ mixclient_get_recv_policy(void *arg, void *buf, size_t *szp, nni_opt_type t)
 	mixclient_sock *s = arg;
 	return (nni_copyout_int(s->recv_policy, buf, szp, t));
 }
-
+*/
 static nni_proto_pipe_ops mixclient_pipe_ops = {
 	.pipe_size  = sizeof(mixclient_pipe),
 	.pipe_init  = mixclient_pipe_init,
