@@ -407,6 +407,51 @@ mixclient_pipe_close(void *arg)
 }
 
 static void
+generate_consume_combined_msg(int policy, mixclient_sock *s)
+{ // should be protected by mtx outside the func, will finish aio
+	bool has_reader = !nni_list_empty(&s->raq);
+	switch (policy) {
+	case NNG_SENDPOLICY_RAW: {
+		if (nni_lmq_full(&s->urq)) {
+			// make space for the new msg
+			nni_msg *old;
+			nni_lmq_get(&s->urq, &old); // should never fail
+			nni_msg_free(old);
+			nni_lmq_put(&s->urq, msg); // should never fail
+		} else if (nni_list_empty(&s->raq)) { // have space in lmq
+			nni_lmq_put(&s->urq, msg);    // should never fail
+		} else { // the urq is empty and there exists aios waiting to
+			 // read
+			nni_aio *reader_aio = nni_list_first(&s->raq);
+			nni_aio_set_msg(reader_aio, msg);
+			nni_list_remove(&s->raq, reader_aio);
+			nni_aio_finish_sync(reader_aio, 0, len);
+		}
+		nni_aio_finish_error(aio, rv); // the error is timeout
+		return;
+	}
+	case NNG_SENDPOLICY_DOUBLE: {
+		break;
+	}
+	case NNG_SENDPOLICY_SAMPLE: {
+		// TODO
+		break;
+	}
+	case NNG_SENDPOLICY_DEFAULT: {
+		// TODO
+		break;
+	}
+	// should never happen
+	default: {
+		nni_msg_free(msg);
+		nni_mtx_unlock(&s->mtx_urq);
+		nni_aio_finish_error(aio, NNG_EINTR); // the error is sever
+		return;
+	}
+	}
+}
+
+static void
 mixclient_pipe_put_cancel(nni_aio *aio, void *arg, int rv)
 {
 	mixclient_sock *s = arg;
@@ -423,22 +468,23 @@ mixclient_pipe_put_cancel(nni_aio *aio, void *arg, int rv)
 		uint8_t  policy = nni_msg_header_peek_at_u8(msg, 8);
 		switch (policy) {
 		case NNG_SENDPOLICY_RAW: {
-			if (!nni_list_empty(&s->raq)) {//if has a reader, should not happen
-				nni_aio *reader_aio = nni_list_first(&s->raq);
-				nni_aio_set_msg(reader_aio, msg);
-				nni_list_remove(&s->raq, reader_aio);
-				nni_mtx_unlock(&s->mtx_urq);
-				nni_aio_finish_sync(reader_aio, 0, len);
-			}else if(nni_lmq_full(&s->urq)){
+			if()
+			if(nni_lmq_full(&s->urq)){
 				//make space for the new msg
 				nni_msg* old;
 				nni_lmq_get(&s->urq,&old);//should never fail
 				nni_msg_free(old);
 				nni_lmq_put(&s->urq,msg);//should never fail
 				nni_mtx_unlock(&s->mtx_urq);
-			}else{// have space in lmq
+			}else if(nni_list_empty(&s->raq)){// have space in lmq
 				nni_lmq_put(&s->urq,msg);//should never fail
 				nni_mtx_unlock(&s->mtx_urq);
+			}else{// the urq is empty and there exists aios waiting to read
+				nni_aio *reader_aio = nni_list_first(&s->raq);
+				nni_aio_set_msg(reader_aio, msg);
+				nni_list_remove(&s->raq, reader_aio);
+				nni_mtx_unlock(&s->mtx_urq);
+				nni_aio_finish_sync(reader_aio, 0, len);
 			}
 			nni_aio_finish_error(aio, rv);//the error is timeout
 			return;
