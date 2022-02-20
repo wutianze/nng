@@ -406,13 +406,117 @@ mixclient_pipe_close(void *arg)
 
 }
 
-static void
-generate_consume_combined_msg(int policy, mixclient_sock *s)
-{ // should be protected by mtx outside the func, will finish aio
-	bool has_reader = !nni_list_empty(&s->raq);
+static nni_msg* generate_combined_msg(mixclient_sock*s){//must generate one from raq, and finish all aio_puts
+	uint8_t policy;
+	uint64_t newest_time=0;
+	nni_aio* first_aio;
+	nni_aio* second_aio;
+	if((first_aio = nni_list_first(&s->paq)) == NULL){
+		return NULL;//no aio
+	}
+	nni_list_remove(&s->paq,first_aio);
+	if((second_aio = nni_list_first(&s->paq)) == NULL){
+		//only first aio
+		nni_msg* tmp_msg = nni_aio_get_msg(first_aio);
+		policy           = nni_msg_header_peek_at_u8(tmp_msg, 8);
+		size_t len = nni_msg_len(tmp_msg);
+		switch (policy) {
+		case NNG_SENDPOLICY_RAW: {
+			nni_aio_set_msg(first_aio, NULL);
+			nni_aio_finish(first_aio,0,len);
+			return tmp_msg;
+		}
+		case NNG_SENDPOLICY_DOUBLE: {
+			return NULL;
+		}
+		case NNG_SENDPOLICY_SAMPLE: {
+			// TODO
+			return NULL;
+		}
+		case NNG_SENDPOLICY_DEFAULT: {
+			// TODO
+			return NULL;
+		}
+		// should never happen
+		default: {
+			nni_msg_free(tmp_msg);
+			nni_aio_finish_error(
+			    first_aio, NNG_EINTR); // the error is sever
+			return NULL;
+		}
+		}
+	} else {
+		// two put_aio
+		nni_list_remove(&s->paq, second_aio);
+		nni_msg* first_msg = nni_aio_get_msg(first_aio);
+		nni_msg* second_msg = nni_aio_get_msg(second_aio);
+		policy           = nni_msg_header_peek_at_u8(first_msg, 8);
+		if(policy != nni_msg_header_peek_at_u8(second_msg, 8))
+		size_t first_len = nni_msg_len(first_msg);
+		switch (policy) {
+		case NNG_SENDPOLICY_RAW: {
+			nni_aio_set_msg(first_aio, NULL);
+			nni_aio_finish(first_aio,0,len);
+			return tmp_msg;
+		}
+		case NNG_SENDPOLICY_DOUBLE: {
+			return NULL;
+		}
+		case NNG_SENDPOLICY_SAMPLE: {
+			// TODO
+			return NULL;
+		}
+		case NNG_SENDPOLICY_DEFAULT: {
+			// TODO
+			return NULL;
+		}
+		// should never happen
+		default: {
+			nni_msg_free(tmp_msg);
+			nni_aio_finish_error(
+			    first_aio, NNG_EINTR); // the error is sever
+			return NULL;
+		}
+		}
+	}
+
+	NNI_LIST_FOREACH(&s->raq,put_aio){
+		nni_msg* tmp_msg = nni_aio_get_msg(put_aio);
+		uint64_t tmp_time = nni_msg_header_peek_at_u64(tmp_msg,8);
+		if(first){
+			newest_aio = put_aio;
+			policy = nni_msg_header_peek_at_u8(tmp_msg,8);
+			newest_time = tmp_time;
+			first = false;
+		}else{
+			if(same){
+				if(policy != nni_msg_header_peek_at_u8(tmp_msg,8)){
+					same = false;
+				}
+			}
+
+			}
+		}
+	}
+	if(same){
+
+	}else{// if not same, we just use the newest msg
+
+	}
+}
+
+static bool// return if the msg is generated successfully; update means delete old msg in lmq if full; force means must generate one, and force also means update is on
+nego_combined_msg(int policy, mixclient_sock *s, bool update, bool force){// aio_put must be in the waiting list already
+	nni_aio* reader;
+	if((reader = nni_list_first(&s->raq))!=NULL){//lmq must be empty
+
+	}
 	switch (policy) {
 	case NNG_SENDPOLICY_RAW: {
 		if (nni_lmq_full(&s->urq)) {
+			if((!force) && (!update)){
+				return false;//just wait, because no place in urq
+			}
 			// make space for the new msg
 			nni_msg *old;
 			nni_lmq_get(&s->urq, &old); // should never fail
@@ -800,7 +904,7 @@ mixclient_sock_send(void *arg, nni_aio *aio)
 		
 		uint32_t id = nni_msg_get_pipe(msg);
 		nni_time now = nni_clock();
-		if(nni_msg_header_insert(msg, &nni_time,8) != 0){
+		if(nni_msg_header_insert_u64(msg, now) != 0){
 			goto send_fail;
 		}
 		nni_mtx_lock(&s->mtx);
@@ -850,7 +954,7 @@ mixclient_sock_send(void *arg, nni_aio *aio)
 			goto send_fail;
 		}
 		nni_time now = nni_clock();
-		if(nni_msg_header_insert(msg, &nni_time,8) != 0){
+		if(nni_msg_header_insert_u64(msg, now) != 0){
 			goto send_fail;
 		}
 		nni_mtx_lock(&s->mtx);

@@ -1,3 +1,10 @@
+/*
+ * @Description: 
+ * @Author: Sauron
+ * @Date: 2022-02-19 09:22:01
+ * @LastEditTime: 2022-02-20 15:42:57
+ * @LastEditors: Sauron
+ */
 //
 // Copyright 2021 Staysail Systems, Inc. <info@staysail.tech>
 // Copyright 2017 Capitar IT Group BV <info@capitar.com>
@@ -43,6 +50,7 @@ extern void     nni_msg_header_append_u32(nni_msg *, uint32_t);
 extern uint32_t nni_msg_header_trim_u32(nni_msg *);
 extern int     nni_msg_header_append_u8(nni_msg *, uint8_t);
 extern int     nni_msg_header_insert_u8(nni_msg *, uint8_t);
+extern int     nni_msg_header_insert_u64(nni_msg *, uint64_t);
 extern uint8_t  nni_msg_header_trim_u8(nni_msg *);
 extern uint8_t      nni_msg_header_chop_u8(nni_msg *);
 extern uint32_t      nni_msg_header_chop_u32(nni_msg *);
@@ -55,6 +63,7 @@ extern uint8_t  nni_msg_header_peek_u8(nni_msg *);
 extern void     nni_msg_header_poke_u8(nni_msg *, uint8_t);
 
 extern uint8_t  nni_msg_peek_at_u8(nni_msg *, size_t);
+extern uint64_t nni_msg_header_peek_at_u64(nni_msg *, size_t);
 extern uint32_t nni_msg_header_peek_at_u32(nni_msg *, size_t);
 extern uint8_t  nni_msg_header_peek_at_u8(nni_msg *, size_t);
 

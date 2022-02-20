@@ -700,6 +700,19 @@ nni_msg_header_insert_u8(nni_msg *m, uint8_t val)
 }
 
 int
+nni_msg_header_insert_u64(nni_msg *m, uint64_t val)
+{
+	if ((sizeof(val) + m->m_header_len) > sizeof(m->m_header_buf)) {
+		return (NNG_EINVAL);
+	}
+	memmove(((uint8_t *) m->m_header_buf) + sizeof(val), m->m_header_buf,
+	    m->m_header_len);
+	NNI_PUT64(m->m_header_buf,val)
+	m->m_header_len += sizeof(val);
+	return (0);
+}
+
+int
 nni_msg_header_append_u8(nni_msg *m, uint8_t val)
 {
 	uint8_t *dst;
@@ -748,11 +761,22 @@ uint32_t nni_msg_header_peek_at_u32(nni_msg *m, size_t place){
 	return (val);
 }
 
-uint8_t  nni_msg_header_peek_at_u8(nni_msg *, size_t){
+uint8_t  nni_msg_header_peek_at_u8(nni_msg *m, size_t place){
 	if(m->nni_msg_header_len < place+1){
 		nni_panic("get msg header out of range\n");
 	}
 	return *((uint8_t*)m->m_header_buf+place);
+}
+
+uint64_t  nni_msg_header_peek_at_u64(nni_msg *m, size_t place){
+	if(m->nni_msg_header_len < place+1){
+		nni_panic("get msg header out of range\n");
+	}
+	uint64_t val;
+	uint8_t *dst;
+	dst = (void*) m->m_header_buf + place;
+	NNI_GET64(dst,val);
+	return val;
 }
 
 void
