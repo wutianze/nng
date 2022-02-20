@@ -73,6 +73,7 @@ struct mixclient_sock {
 	nni_lmq       urq;
 	nni_list      raq;
 	nni_list      paq;//aio_put from pipes
+	nni_time      current_time;//useful for some policies like double
 
 	/* replaced by adding tryget in msgqueue.c
 	int            fd_urgent;
@@ -184,6 +185,7 @@ mixclient_sock_init(void *arg, nni_sock *sock)
 	NNI_LIST_INIT(&s->safe_list, mixclient_pipe, node_safe);
 	nni_lmq_init(&s->urq,0);
 	nni_aio_list_init(&s->raq);
+	s->current_time = 0;
 	s->sock = sock;
 
 
@@ -406,28 +408,45 @@ mixclient_pipe_close(void *arg)
 
 }
 
-static nni_msg* generate_combined_msg(mixclient_sock*s){//must generate one from raq, and finish all aio_puts
+static nni_msg* generate_combined_msg(mixclient_sock*s, bool force, nni_aio* cancel_aio){//force means generate one from raq, and finish all aio_puts
+	// must be protected by mtx
 	uint8_t policy;
-	uint64_t newest_time=0;
 	nni_aio* first_aio;
 	nni_aio* second_aio;
+	
+	while((first_aio = nni_list_first(&s->paq))!=NULL){
+		uint64_t tmp_time = nni_msg_header_peek_at_u64(nni_aio_get_msg(first_aio),8);
+		if(tmp_time <= s->current_time){
+			nni_aio_list_remove(first_aio);
+			nni_aio_finish_sync(first_aio,NNG_WMIX,0);//not real error, but inform put_cb to free the msg
+		}
+	}
 	if((first_aio = nni_list_first(&s->paq)) == NULL){
 		return NULL;//no aio
 	}
-	nni_list_remove(&s->paq,first_aio);
 	if((second_aio = nni_list_first(&s->paq)) == NULL){
 		//only first aio
+		if(first_aio == cancel_aio)force = true;
 		nni_msg* tmp_msg = nni_aio_get_msg(first_aio);
 		policy           = nni_msg_header_peek_at_u8(tmp_msg, 8);
 		size_t len = nni_msg_len(tmp_msg);
+		nni_time tmp_time = nni_msg_header_peek_at_u64(tmp_msg,0);
+		
 		switch (policy) {
 		case NNG_SENDPOLICY_RAW: {
+			s->current_time = tmp_time;
 			nni_aio_set_msg(first_aio, NULL);
+			nni_aio_list_remove(first_aio);
 			nni_aio_finish(first_aio,0,len);
 			return tmp_msg;
 		}
 		case NNG_SENDPOLICY_DOUBLE: {
-			return NULL;
+			if(!force)return NULL;//wait for the next copy
+			s->current_time = tmp_time;
+			nni_aio_set_msg(first_aio, NULL);
+			nni_aio_list_remove(first_aio);
+			nni_aio_finish(first_aio,0,len);
+			return tmp_msg;
 		}
 		case NNG_SENDPOLICY_SAMPLE: {
 			// TODO
@@ -437,71 +456,164 @@ static nni_msg* generate_combined_msg(mixclient_sock*s){//must generate one from
 			// TODO
 			return NULL;
 		}
-		// should never happen
 		default: {
-			nni_msg_free(tmp_msg);
-			nni_aio_finish_error(
-			    first_aio, NNG_EINTR); // the error is sever
+			nni_aio_list_remove(first_aio);
+			nni_aio_finish_error(first_aio, NNG_EINTR); // the error is sever
 			return NULL;
 		}
 		}
-	} else {
-		// two put_aio
+	} else {// two put_aio
 		nni_list_remove(&s->paq, second_aio);
 		nni_msg* first_msg = nni_aio_get_msg(first_aio);
 		nni_msg* second_msg = nni_aio_get_msg(second_aio);
 		policy           = nni_msg_header_peek_at_u8(first_msg, 8);
-		if(policy != nni_msg_header_peek_at_u8(second_msg, 8))
+		uint8_t second_policy = nni_msg_header_peek_at_u8(second_msg, 8);
+		nni_time first_time = nni_msg_header_peek_at_u64(first_msg,0);
+		nni_time second_time = nni_msg_header_peek_at_u64(second_msg,0);
 		size_t first_len = nni_msg_len(first_msg);
-		switch (policy) {
-		case NNG_SENDPOLICY_RAW: {
-			nni_aio_set_msg(first_aio, NULL);
-			nni_aio_finish(first_aio,0,len);
-			return tmp_msg;
-		}
-		case NNG_SENDPOLICY_DOUBLE: {
-			return NULL;
-		}
-		case NNG_SENDPOLICY_SAMPLE: {
-			// TODO
-			return NULL;
-		}
-		case NNG_SENDPOLICY_DEFAULT: {
-			// TODO
-			return NULL;
-		}
-		// should never happen
-		default: {
-			nni_msg_free(tmp_msg);
-			nni_aio_finish_error(
-			    first_aio, NNG_EINTR); // the error is sever
-			return NULL;
-		}
-		}
-	}
-
-	NNI_LIST_FOREACH(&s->raq,put_aio){
-		nni_msg* tmp_msg = nni_aio_get_msg(put_aio);
-		uint64_t tmp_time = nni_msg_header_peek_at_u64(tmp_msg,8);
-		if(first){
-			newest_aio = put_aio;
-			policy = nni_msg_header_peek_at_u8(tmp_msg,8);
-			newest_time = tmp_time;
-			first = false;
-		}else{
-			if(same){
-				if(policy != nni_msg_header_peek_at_u8(tmp_msg,8)){
-					same = false;
+		size_t second_len = nni_msg_len(second_msg);
+		if(first_time == second_time){
+			if(policy != second_policy){//should never happen
+				s->current_time = first_time;
+				nni_aio_list_remove(first_aio);
+				nni_aio_finish_error(first_aio, NNG_EINTR); // the error is sever
+				nni_aio_list_remove(second_aio);
+				nni_aio_finish_error(second_aio, NNG_EINTR); // the error is sever
+				return NULL;
+			}
+			switch (policy) {
+				case NNG_SENDPOLICY_RAW: {
+					s->current_time = first_time;
+					nni_aio_list_remove(first_aio);
+					nni_aio_finish_error(first_aio, NNG_EINTR); // the error is sever
+					nni_aio_list_remove(second_aio);
+					nni_aio_finish_error(second_aio, NNG_EINTR); // the error is sever
+					return NULL;
+				}
+				case NNG_SENDPOLICY_DOUBLE: {
+					s->current_time = first_time;
+					nni_aio_set_msg(first_aio, NULL);
+					nni_aio_list_remove(first_aio);
+					nni_aio_finish(first_aio,0,first_len);
+					nni_aio_set_msg(second_aio, NULL);
+					nni_aio_list_remove(second_aio);
+					nni_aio_finish(second_aio,0,second_len);
+					nni_msg_free(second_msg);//free one
+					return first_msg;//return one
+				}
+				case NNG_SENDPOLICY_SAMPLE: {
+					// TODO
+					return NULL;
+				}
+				case NNG_SENDPOLICY_DEFAULT: {
+					// TODO
+					return NULL;
+				}
+				// should never happen
+				default: {
+					s->current_time = first_time;
+					nni_aio_list_remove(first_aio);
+					nni_aio_finish_error(first_aio, NNG_EINTR); // the error is sever
+					nni_aio_list_remove(second_aio);
+					nni_aio_finish_error(second_aio, NNG_EINTR); // the error is sever
+					return NULL;
 				}
 			}
-
+		}else{// must finish the old one and the cancel_aio, both are bigger than current_time
+			nni_aio* old_aio;
+			size_t old_len;
+			nni_msg* old_msg;
+			nni_time old_time;
+			uint8_t old_policy;
+			if(first_time > second_time){
+				old_aio = second_aio;
+				old_len = second_aio;
+				old_msg = second_aio;
+				old_time = second_time;
+				old_policy = second_policy;
+			}else{
+				old_aio = first_aio;
+				old_len = first_aio;
+				old_msg = first_aio;
+				old_time = first_time;
+				old_policy = policy;
+			}
+			if(policy == second_policy){//because some policy may use msgs with different timestamps
+				switch (policy) {
+					case NNG_SENDPOLICY_RAW:// will never happen
+					case NNG_SENDPOLICY_DOUBLE: {
+						if(cancel_aio == NULL || old_aio == cancel_aio){
+							s->current_time = old_time;
+							nni_aio_set_msg(old_aio, NULL);
+							nni_aio_list_remove(old_aio);
+							nni_aio_finish_sync(old_aio,0,old_len);//not real error, but inform put_cb to free the msg
+							return old_msg;
+						}
+						nni_aio_list_remove(old_aio);
+						nni_aio_finish_sync(old_aio,NNG_WMIX,0);//not real error, but inform put_cb to free the msg
+						nni_msg* cancel_msg = nni_aio_get_msg(cancel_aio);
+						s->current_time = nni_msg_header_peek_at_u64(cancel_msg,0);
+						nni_aio_set_msg(cancel_aio, NULL);
+						nni_aio_list_remove(cancel_aio);
+						nni_aio_finish(cancel_aio,0, nni_msg_len(cancel_msg);
+						return cancel_msg;
+					}
+					case NNG_SENDPOLICY_SAMPLE: {
+						// TODO
+						return NULL;
+					}
+					case NNG_SENDPOLICY_DEFAULT: {
+						// TODO
+						return NULL;
+					}
+					// should never happen
+					default: {
+						nni_aio_list_remove(first_aio);
+						nni_aio_finish_error(first_aio, NNG_EINTR); // the error is sever
+						nni_aio_list_remove(second_aio);
+						nni_aio_finish_error(second_aio, NNG_EINTR); // the error is sever
+						return NULL;
+					}
+				}
+			}else{// must finish the old one
+				switch (old_policy) {
+					case NNG_SENDPOLICY_RAW:
+					case NNG_SENDPOLICY_DOUBLE: {
+						if(cancel_aio == NULL || old_aio == cancel_aio){
+							s->current_time = old_time;
+							nni_aio_set_msg(old_aio, NULL);
+							nni_aio_list_remove(old_aio);
+							nni_aio_finish_sync(old_aio,0,old_len);//not real error, but inform put_cb to free the msg
+							return old_msg;
+						}
+						nni_aio_list_remove(old_aio);
+						nni_aio_finish_sync(old_aio,NNG_WMIX,0);//not real error, but inform put_cb to free the msg
+						nni_msg* cancel_msg = nni_aio_get_msg(cancel_aio);
+						s->current_time = nni_msg_header_peek_at_u64(cancel_msg,0);
+						nni_aio_set_msg(cancel_aio, NULL);
+						nni_aio_list_remove(cancel_aio);
+						nni_aio_finish(cancel_aio,0, nni_msg_len(cancel_msg);
+						return cancel_msg;
+					}
+					case NNG_SENDPOLICY_SAMPLE: {
+						// TODO
+						return NULL;
+					}
+					case NNG_SENDPOLICY_DEFAULT: {
+						// TODO
+						return NULL;
+					}
+					// should never happen
+					default: {
+						nni_aio_list_remove(first_aio);
+						nni_aio_finish_error(first_aio, NNG_EINTR); // the error is sever
+						nni_aio_list_remove(second_aio);
+						nni_aio_finish_error(second_aio, NNG_EINTR); // the error is sever
+						return NULL;
+					}
+				}
 			}
 		}
-	}
-	if(same){
-
-	}else{// if not same, we just use the newest msg
-
 	}
 }
 
@@ -623,7 +735,12 @@ mixclient_pipe_put_cb(void *arg)
 	int rv = nni_aio_result(&p->aio_put);
 	if(rv == 0 || rv == NNG_ETIMEDOUT){
 		nni_pipe_recv(p->pipe, &p->aio_recv);
-	}else{
+	}else if(rv == NNG_WMIX){
+		nni_msg_free(nni_aio_get_msg(&p->aio_put));
+		nni_aio_set_msg(&p->aio_put, NULL);
+		nni_pipe_recv(p->pipe, &p->aio_recv);
+	}
+	else{
 		nni_msg_free(nni_aio_get_msg(&p->aio_put));
 		nni_aio_set_msg(&p->aio_put, NULL);
 		nni_pipe_close(p->pipe);
@@ -875,7 +992,7 @@ mixclient_send_cancel(nni_aio *aio, void *arg, int rv)
 }
 
 static void
-mixclient_sock_send(void *arg, nni_aio *aio)
+mixclient_sock_send(void *arg, nni_aio *aio)// the rv is handled by user, dont need to remove aio from list
 {
 	mixclient_sock *s = arg;
 	int rv;
@@ -989,7 +1106,7 @@ mixclient_sock_send(void *arg, nni_aio *aio)
 			}else if(rv == 0){
 				nni_aio_list_append(&first_pipe->waq,aio);
 				aio_used = true;
-			}// TIMEOUT, wont let aio wait
+			}// rv is TIMEOUT, wont let aio wait
 			nni_mtx_unlock(&first_pipe->mtx_send);
 		}
 
@@ -1007,8 +1124,10 @@ mixclient_sock_send(void *arg, nni_aio *aio)
 				nni_mtx_unlock(&second_pipe->mtx_send);
 				return;
 			}
-			// must be NNG_WMIX or TIMEOUT
-			nni_aio_finish_error(aio,NNG_WMIX);
+			// aio is not used(ECLOSED or TIMEOUT) and is useless
+			nni_msg_free(msg);
+			nni_aio_set_msg(aio,NULL);
+			nni_aio_finish(aio,0,len);// success, but free the msg 
 			nni_mtx_unlock(&second_pipe->mtx_send);
 			return;
 		}
@@ -1022,7 +1141,9 @@ mixclient_sock_send(void *arg, nni_aio *aio)
 			// let aio wait, we dont care if the NONBLOCK is set
 			rv = nni_aio_schedule(aio,mixclient_send_cancel,second_pipe);
 			if(rv == NNG_ECLOSED){
-				nni_aio_finish_error(aio,NNG_WMIX);
+				nni_msg_free(msg);
+				nni_aio_set_msg(aio,NULL);
+				nni_aio_finish(aio,0,len);// first pipe success, so success
 				nni_mtx_unlock(&second_pipe->mtx_send);
 				return;
 			}else if(rv == 0){
@@ -1030,7 +1151,9 @@ mixclient_sock_send(void *arg, nni_aio *aio)
 				nni_mtx_unlock(&second_pipe->mtx_send);
 				return;
 			}// TIMEOUT, wont let aio wait
-			nni_aio_finish_error(aio,NNG_WMIX);// first pipe success
+			nni_msg_free(msg);
+			nni_aio_set_msg(aio,NULL);
+			nni_aio_finish(aio,0,len);// first pipe success
 			nni_mtx_unlock(&second_pipe->mtx_send);
 			return;
 		}else{
@@ -1039,7 +1162,7 @@ mixclient_sock_send(void *arg, nni_aio *aio)
 					nni_mtx_unlock(&second_pipe->mtx_send);
 					return;
 				}
-				nni_aio_finish_error(aio,NNG_WMIX);// first pipe success
+				nni_msg_free(dup_m);
 				nni_mtx_unlock(&second_pipe->mtx_send);
 				return;
 			}else{//the first pipe is closed or TIMEOUT
