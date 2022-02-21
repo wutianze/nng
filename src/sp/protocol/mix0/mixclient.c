@@ -70,7 +70,7 @@ struct mixclient_sock {
 	nni_sock      *sock;
 
 	nni_mtx       mtx_urq;
-	nni_lmq       urq;
+	nni_lmq       urq;//release this in sock close with mtx_urq, and lmq_fini in sock_fini will release this again without mtx_urq
 	nni_list      raq;
 	nni_list      paq;//aio_put from pipes
 	nni_time      current_time;//useful for some policies like double
@@ -109,7 +109,7 @@ struct mixclient_pipe {
 	mixclient_sock       *pair;
 	
 	nni_mtx         mtx_send;
-	nni_lmq         send_queue;
+	nni_lmq         send_queue;//release this in pipe_stop and pipe_fini
 	nni_list        waq;
 	
 	nni_aio         aio_send;
@@ -118,7 +118,6 @@ struct mixclient_pipe {
 	nni_aio         aio_put;
 	
 	bool            w_ready;
-	bool            r_ready;
 
 	nni_list_node   node_delay;
 	nni_list_node   node_bw;
@@ -160,7 +159,7 @@ mixclient_sock_close(void *arg)
 	nni_aio *a;
 	nni_msg *m;
 	nni_mtx_lock(&s->mtx_urq);
-	while((a=nni_list_first(&s->raq))!=NULL){
+	while((a=nni_list_first(&s->raq))!=NULL ||((a=nni_list_first(&s->paq))!=NULL)){
 		nni_aio_list_remove(a);
 		nni_aio_finish_error(a,NNG_ECLOSED);
 	}
@@ -182,9 +181,10 @@ mixclient_sock_init(void *arg, nni_sock *sock)
 	NNI_LIST_INIT(&s->delay_list, mixclient_pipe, node_delay);
 	NNI_LIST_INIT(&s->bw_list, mixclient_pipe, node_bw);
 	NNI_LIST_INIT(&s->reliable_list, mixclient_pipe, node_reliable);
-	NNI_LIST_INIT(&s->safe_list, mixclient_pipe, node_safe);
-	nni_lmq_init(&s->urq,0);
+	NNI_LIST_INIT(&s->security_list, mixclient_pipe, node_safe);
+	nni_lmq_init(&s->urq,4);//should be big enough
 	nni_aio_list_init(&s->raq);
+	nni_aio_list_init(&s->paq);
 	s->current_time = 0;
 	s->sock = sock;
 
@@ -269,7 +269,16 @@ mixclient_pipe_stop(void *arg)
 {
 	mixclient_pipe *p = arg;
 	nni_mtx_lock(&p->mtx_send);
-
+	nni_aio* a;
+	nni_msg* m;
+	while((a=nni_list_first(&p->waq))!=NULL){
+		nni_aio_list_remove(a);
+		nni_aio_finish_error(a,NNG_ECLOSED);
+	}
+	while(nni_lmq_get(&p->send_queue,&m) ==0){
+		nni_msg_free(m);
+	}
+	nni_mtx_unlock(&p->mtx_send);
 	nni_aio_stop(&p->aio_send);
 	nni_aio_stop(&p->aio_recv);
 	nni_aio_stop(&p->aio_put);
@@ -283,18 +292,22 @@ mixclient_pipe_fini(void *arg)
 	nni_aio_fini(&p->aio_send);
 	nni_aio_fini(&p->aio_recv);
 	nni_aio_fini(&p->aio_put);
+	nni_lmq_fini(&p->send_queue);
+	nni_mtx_fini(&p->mtx_send);
 }
 
 static int
 mixclient_pipe_init(void *arg, nni_pipe *pipe, void *pair)
 {
 	mixclient_pipe *p = arg;
-	int             rv;
 
+	nni_mtx_init(&p->mtx_send);
 	nni_aio_init(&p->aio_send, mixclient_pipe_send_cb, p);
 	nni_aio_init(&p->aio_recv, mixclient_pipe_recv_cb, p);
 	nni_aio_init(&p->aio_put, mixclient_pipe_put_cb, p);
-
+	nni_aio_list_init(&p->waq);
+	nni_lmq_init(&p->send_queue);
+	
 	nni_aio_set_timeout(&p->aio_put,100); // 100 msec, this could be set dynamically?
 
 	/*
@@ -342,15 +355,14 @@ mixclient_pipe_start(void *arg)
 	mixclient_sock *s = p->pair;
 	uint32_t        id;
 	int             rv;
-
-	nni_mtx_lock(&s->mtx);
+	
 	if (nni_pipe_peer(p->pipe) != NNG_MIXCLIENT_PEER) {
 		nni_mtx_unlock(&s->mtx);
 		BUMP_STAT(&s->stat_reject_mismatch);
 		// Peer protocol mismatch.
 		return (NNG_EPROTO);
 	}
-
+	nni_mtx_lock(&s->mtx);
 	// add the new pipe in sock
 	id = nni_pipe_id(p->pipe);
 	if ((rv = nni_id_set(&s->pipes, id, p)) != 0) {
@@ -373,15 +385,10 @@ mixclient_pipe_start(void *arg)
 		nni_mtx_unlock(&s->mtx);
 		return rv;
 	}
-
 	nni_mtx_unlock(&s->mtx);
 
-	// Schedule a get.  In mixclientamorous mode we get on the per pipe
-	// send_queue, as the socket distributes to us. In monogamous mode
-	// we bypass and get from the upper write queue directly (saving a
-	// set of context switches).
-	nni_msgq_aio_get(p->send_queue, &p->aio_get);
-
+	//start send
+	mixclient_send_sched(p);
 	// And the pipe read of course.
 	nni_pipe_recv(p->pipe, &p->aio_recv);
 
@@ -398,6 +405,9 @@ mixclient_pipe_close(void *arg)
 	nni_aio_close(&p->aio_recv);
 	nni_aio_close(&p->aio_put);
 
+	nni_mtx_lock(&p->mtx_send);
+	p->w_ready = false;
+	nni_mtx_unlock(&p->mtx_send);
 	nni_mtx_lock(&s->mtx);
 	nni_id_remove(&s->pipes, nni_pipe_id(p->pipe));
 	nni_list_node_remove(&p->node_delay);
@@ -405,14 +415,19 @@ mixclient_pipe_close(void *arg)
 	nni_list_node_remove(&p->node_reliable);
 	nni_list_node_remove(&p->node_safe);
 	nni_mtx_unlock(&s->mtx);
-
 }
 
-static nni_msg* generate_combined_msg(mixclient_sock*s, bool force, nni_aio* cancel_aio){//force means generate one from raq, and finish all aio_puts
+static nni_msg* generate_combined_msg(mixclient_sock*s, nni_aio* cancel_aio){
 	// must be protected by mtx
 	uint8_t policy;
 	nni_aio* first_aio;
 	nni_aio* second_aio;
+
+	if(cancel_aio != NULL){
+		if(!nni_list_active(&s->paq,cancel_aio)){
+			cancel_aio = NULL;// nego has finished the cancel_aio
+		}
+	}
 	
 	while((first_aio = nni_list_first(&s->paq))!=NULL){
 		uint64_t tmp_time = nni_msg_header_peek_at_u64(nni_aio_get_msg(first_aio),8);
@@ -426,7 +441,6 @@ static nni_msg* generate_combined_msg(mixclient_sock*s, bool force, nni_aio* can
 	}
 	if((second_aio = nni_list_first(&s->paq)) == NULL){
 		//only first aio
-		if(first_aio == cancel_aio)force = true;
 		nni_msg* tmp_msg = nni_aio_get_msg(first_aio);
 		policy           = nni_msg_header_peek_at_u8(tmp_msg, 8);
 		size_t len = nni_msg_len(tmp_msg);
@@ -441,7 +455,7 @@ static nni_msg* generate_combined_msg(mixclient_sock*s, bool force, nni_aio* can
 			return tmp_msg;
 		}
 		case NNG_SENDPOLICY_DOUBLE: {
-			if(!force)return NULL;//wait for the next copy
+			if(first_aio != cancel_aio)return NULL;//wait for the next copy
 			s->current_time = tmp_time;
 			nni_aio_set_msg(first_aio, NULL);
 			nni_aio_list_remove(first_aio);
@@ -457,6 +471,7 @@ static nni_msg* generate_combined_msg(mixclient_sock*s, bool force, nni_aio* can
 			return NULL;
 		}
 		default: {
+			s->current_time = tmp_time;
 			nni_aio_list_remove(first_aio);
 			nni_aio_finish_error(first_aio, NNG_EINTR); // the error is sever
 			return NULL;
@@ -568,6 +583,7 @@ static nni_msg* generate_combined_msg(mixclient_sock*s, bool force, nni_aio* can
 					}
 					// should never happen
 					default: {
+						s->current_time = first_time > second_time?first_time:second_time;
 						nni_aio_list_remove(first_aio);
 						nni_aio_finish_error(first_aio, NNG_EINTR); // the error is sever
 						nni_aio_list_remove(second_aio);
@@ -605,6 +621,7 @@ static nni_msg* generate_combined_msg(mixclient_sock*s, bool force, nni_aio* can
 					}
 					// should never happen
 					default: {
+						s->current_time = first_time > second_time?first_time:second_time;
 						nni_aio_list_remove(first_aio);
 						nni_aio_finish_error(first_aio, NNG_EINTR); // the error is sever
 						nni_aio_list_remove(second_aio);
@@ -617,53 +634,43 @@ static nni_msg* generate_combined_msg(mixclient_sock*s, bool force, nni_aio* can
 	}
 }
 
-static bool// return if the msg is generated successfully; update means delete old msg in lmq if full; force means must generate one, and force also means update is on
-nego_combined_msg(int policy, mixclient_sock *s, bool update, bool force){// aio_put must be in the waiting list already
+static void
+nego_combined_msg(mixclient_sock *s,nni_aio* cancel_aio){// aio_put and reader aio must be in the waiting list already
 	nni_aio* reader;
-	if((reader = nni_list_first(&s->raq))!=NULL){//lmq must be empty
-
-	}
-	switch (policy) {
-	case NNG_SENDPOLICY_RAW: {
-		if (nni_lmq_full(&s->urq)) {
-			if((!force) && (!update)){
-				return false;//just wait, because no place in urq
-			}
-			// make space for the new msg
+	while((reader = nni_list_first(&s->raq))!=NULL){
+		if (!nni_lmq_empty(&s->urq)) {
 			nni_msg *old;
 			nni_lmq_get(&s->urq, &old); // should never fail
-			nni_msg_free(old);
-			nni_lmq_put(&s->urq, msg); // should never fail
-		} else if (nni_list_empty(&s->raq)) { // have space in lmq
-			nni_lmq_put(&s->urq, msg);    // should never fail
-		} else { // the urq is empty and there exists aios waiting to
-			 // read
-			nni_aio *reader_aio = nni_list_first(&s->raq);
-			nni_aio_set_msg(reader_aio, msg);
-			nni_list_remove(&s->raq, reader_aio);
-			nni_aio_finish_sync(reader_aio, 0, len);
+			nni_aio_list_remove(reader);
+			nni_aio_set_msg(reader,old);
+			nni_aio_finish_sync(reader,0,nni_msg_len(old));
+			nni_msg *new = generate_combined_msg(s,cancel_aio);
+			if(new != NULL)nni_lmq_put(&s->urq, new); // should never fail
+			continue;
 		}
-		nni_aio_finish_error(aio, rv); // the error is timeout
+		nni_msg *new = generate_combined_msg(s,cancel_aio);// most time, new is NULL
+		if(new != NULL){
+			nni_aio_list_remove(reader);
+			nni_aio_set_msg(reader,new);
+			nni_aio_finish_sync(reader,0,nni_msg_len(new));
+			continue;
+		}
+		// no msg available, and generate fail, we should not generate again
 		return;
 	}
-	case NNG_SENDPOLICY_DOUBLE: {
-		break;
-	}
-	case NNG_SENDPOLICY_SAMPLE: {
-		// TODO
-		break;
-	}
-	case NNG_SENDPOLICY_DEFAULT: {
-		// TODO
-		break;
-	}
-	// should never happen
-	default: {
-		nni_msg_free(msg);
-		nni_mtx_unlock(&s->mtx_urq);
-		nni_aio_finish_error(aio, NNG_EINTR); // the error is sever
+	//no more reader
+	nni_msg *new = generate_combined_msg(s,cancel_aio);
+	if(new == NULL)return;
+	if (nni_lmq_full(&s->urq)) {
+		// make space for the new msg
+		nni_msg *old;
+		nni_lmq_get(&s->urq, &old); // should never fail
+		nni_msg_free(old);
+		nni_lmq_put(&s->urq, new); // should never fail
 		return;
-	}
+	} else{ // have space in lmq
+		nni_lmq_put(&s->urq, new);    // should never fail
+		return;
 	}
 }
 
@@ -671,60 +678,13 @@ static void
 mixclient_pipe_put_cancel(nni_aio *aio, void *arg, int rv)
 {
 	mixclient_sock *s = arg;
-	size_t len;
 
 	nni_mtx_lock(&s->mtx_urq);
-
+	//if rv is NNG_ECLOSED or NNG_ECANCELED, we can still use the msg in aio_put and finish it normally, because nni_pipe_recv will help stop the recv progress
 	if (nni_aio_list_active(aio)) {
-		nni_aio_list_remove(aio);//this aio will certainly be removed from paq
-		nni_msg* msg = nni_aio_get_msg(aio);
-		nni_aio_set_msg(aio,NULL);
-		len = nni_msg_len(msg);
-
-		uint8_t  policy = nni_msg_header_peek_at_u8(msg, 8);
-		switch (policy) {
-		case NNG_SENDPOLICY_RAW: {
-			if()
-			if(nni_lmq_full(&s->urq)){
-				//make space for the new msg
-				nni_msg* old;
-				nni_lmq_get(&s->urq,&old);//should never fail
-				nni_msg_free(old);
-				nni_lmq_put(&s->urq,msg);//should never fail
-				nni_mtx_unlock(&s->mtx_urq);
-			}else if(nni_list_empty(&s->raq)){// have space in lmq
-				nni_lmq_put(&s->urq,msg);//should never fail
-				nni_mtx_unlock(&s->mtx_urq);
-			}else{// the urq is empty and there exists aios waiting to read
-				nni_aio *reader_aio = nni_list_first(&s->raq);
-				nni_aio_set_msg(reader_aio, msg);
-				nni_list_remove(&s->raq, reader_aio);
-				nni_mtx_unlock(&s->mtx_urq);
-				nni_aio_finish_sync(reader_aio, 0, len);
-			}
-			nni_aio_finish_error(aio, rv);//the error is timeout
-			return;
-		}
-		case NNG_SENDPOLICY_DOUBLE: {
-			break;
-		}
-		case NNG_SENDPOLICY_SAMPLE: {
-			// TODO
-			break;
-		}
-		case NNG_SENDPOLICY_DEFAULT: {
-			// TODO
-			break;
-		}
-		// should never happen
-		default: {
-			nni_msg_free(msg);
-			nni_mtx_unlock(&s->mtx_urq);
-			nni_aio_finish_error(aio, NNG_EINTR);//the error is sever
-			return;
-		}
-		}
+		nego_combined_msg(s,aio);
 	} // if not, means the aio is finished by other pipe
+	nni_mtx_unlock(&s->mtx_urq);
 }
 
 static void
@@ -733,14 +693,13 @@ mixclient_pipe_put_cb(void *arg)
 	mixclient_pipe *p = arg;
 
 	int rv = nni_aio_result(&p->aio_put);
-	if(rv == 0 || rv == NNG_ETIMEDOUT){
+	if(rv == 0){// if the pipe has been closed but we return 0, nni_pipe_recv will just return and do nothing
 		nni_pipe_recv(p->pipe, &p->aio_recv);
 	}else if(rv == NNG_WMIX){
 		nni_msg_free(nni_aio_get_msg(&p->aio_put));
 		nni_aio_set_msg(&p->aio_put, NULL);
 		nni_pipe_recv(p->pipe, &p->aio_recv);
-	}
-	else{
+	}else{
 		nni_msg_free(nni_aio_get_msg(&p->aio_put));
 		nni_aio_set_msg(&p->aio_put, NULL);
 		nni_pipe_close(p->pipe);
@@ -803,81 +762,31 @@ mixclient_pipe_recv_cb(void *arg)
 	len = nni_msg_len(msg);
 	nni_sock_bump_rx(s->sock, len);
 
-	// Send the message up.
-	//nni_aio_set_msg(&p->aio_put, msg);
-	nni_aio *a;
-	switch(send_policy){
-		case NNG_SENDPOLICY_RAW:{//only one pipe works
-			nni_mtx_lock(&s->mtx_urq);
-			if((a = nni_list_first(&s->raq)) != NULL){
-				nni_aio_list_remove(a);
-				nni_aio_set_msg(a,msg);
-				nni_pipe_recv(pipe,&p->aio_recv);
-				nni_mtx_unlock(&s->mtx_urq);
-				nni_aio_finish_sync(a,0,len);
-				return;
-			}
-			//have room in the urq?
-			if(!nni_lmq_full(&s->urq)){
-				nni_lmq_put(&s->urq,msg);
-				nni_pipe_recv(pipe,&p->aio_recv);
-				nni_mtx_unlock(&s->mtx_urq);
-				return;
-			}
-		        nni_aio_set_msg(&p->aio_put, msg);
-
-			if((rv = nni_aio_begin(&p->aio_put)) != 0){// the pipe has been closed, should not happen
-				nni_msg_free(msg);
-				nni_mtx_unlock(&s->mtx_urq);
-				return;
-			}
-		        if ((rv = nni_aio_schedule(&p->aio_put, mixclient_pipe_put_cancel, s)) !=0) {
-			        nni_aio_finish_error(&p->aio_put, rv);//should only happen when the pipe is closed
-				nni_mtx_unlock(&s->mtx_urq);
-		        } else {
-			        nni_aio_list_append(&s->raq, &p->aio_put);
-				nni_mtx_unlock(&s->mtx_urq);
-		        }
-		        break;
-	        }
-	        case NNG_SENDPOLICY_SAMPLE:{
-			//TODO
-			break;
-		}
-		case NNG_SENDPOLICY_DEFAULT:{
-			//TODO
-			break;
-		}
-		//wrong code means err and we won't get the following content
-		default:{
-			goto msg_error;
-		}
+	// Send the message up. Aio_put should be inserted first before nego
+	nni_aio_set_msg(&p->aio_put, msg);
+	if((rv = nni_aio_begin(&p->aio_put)) != 0){// the pipe has been closed, should not happen
+		nni_msg_free(msg);
+		return;
 	}
-	
-	return;	
+	nni_mtx_lock(&s->mtx_urq);
+	nni_aio_list_append(&s->paq, &p->aio_put);// aio_begin must be before list append
+	nego_combined_msg(s,NULL);// for performance, we nego first, if fail, we schedule the aio
+	if(nni_aio_list_active(&p->aio_put)){//still in paq means fail
+		if ((rv = nni_aio_schedule(&p->aio_put, mixclient_pipe_put_cancel, s)) !=0) {
+			nni_aio_finish_error(&p->aio_put, rv);//should only happen when the pipe is closed
+			nni_mtx_unlock(&s->mtx_urq);
+			return;
+		}
+		//start wait
+	}
+	nni_mtx_unlock(&s->mtx_urq);
+	return;// pub_cb has run pipe_recv already
 msg_error:
 	BUMP_STAT(&s->stat_rx_malformed);
 	nni_msg_free(msg);
-	nni_pipe_close(pipe);
+	nni_pipe_close(pipe);// dont need to pipe_recv
 	return;
 }
-
-/*
-static int
-tryput_in_pipe_list(nni_list*list_pipe, nni_msg*msg, int count){
-	int finished = 0;
-	int rv = 0;
-	mixclient_pipe*exist_pipe;
-	NNI_LIST_FOREACH(list_pipe,exist_pipe){
-		if((rv = nni_msgq_tryput(exist_pipe->send_queue,msg))==0){
-			finished++;
-			if(finished == count)return 0;
-		}else{
-			return rv;
-		}
-	}
-	return NNG_EAGAIN;
-}*/
 
 // return the first pipe in the chosen_list
 static mixclient_pipe*
@@ -906,26 +815,6 @@ pipe_from_nature_list(uint8_t nature, mixclient_sock*s){
 	}
 	return NULL;
 }
-
-
-/*
-static void
-mixclient_pipe_get_cb(void *arg)
-{
-	mixclient_pipe *p = arg;
-	nni_msg *       msg;
-
-	if (nni_aio_result(&p->aio_get) != 0) {
-		nni_pipe_close(p->pipe);
-		return;
-	}
-
-	msg = nni_aio_get_msg(&p->aio_get);
-	nni_aio_set_msg(&p->aio_get, NULL);
-
-	nni_aio_set_msg(&p->aio_send, msg);
-	nni_pipe_send(p->pipe, &p->aio_send);
-}*/
 
 static void mixclient_pipe_send(mixclient_pipe *p, nni_msg *m){
 	NNI_ASSERT(!nni_msg_shared(m));
@@ -983,12 +872,25 @@ mixclient_send_cancel(nni_aio *aio, void *arg, int rv)
 {
 	mixclient_pipe *p = arg;
 
-	nni_mtx_lock(&p->mtx_send);
+	nni_mtx_lock(&p->mtx_send);// aio is in the pipe's send_queue, so just lock pipe
 	if (nni_aio_list_active(aio)) {
 		nni_aio_list_remove(aio);
 		nni_aio_finish_error(aio, rv);
 	}
 	nni_mtx_unlock(&p->mtx_send);
+}
+
+static void
+mixclient_recv_cancel(nni_aio *aio, void *arg, int rv)
+{
+	mixclient_sock *s = arg;
+
+	nni_mtx_lock(&s->mtx_urq);// aio is in the sock's raq, so lock urq
+	if (nni_aio_list_active(aio)) {
+		nni_aio_list_remove(aio);
+		nni_aio_finish_error(aio, rv);
+	}
+	nni_mtx_unlock(&s->mtx_urq);
 }
 
 static void
@@ -1208,8 +1110,6 @@ send_fail:
 	return;
 }
 
-
-
 static void
 mixclient_sock_recv(void *arg, nni_aio *aio)
 {
@@ -1221,44 +1121,16 @@ mixclient_sock_recv(void *arg, nni_aio *aio)
 		return;
 	}
 	nni_mtx_lock(&s->mtx_urq);
-
-	// Buffered read.  If there is a message waiting for us, pick
-	// it up.  We might need to post another read request as well.
-	if (nni_lmq_get(&s->urq, &m) == 0) {
-		nni_aio_set_msg(aio, m);
-		nni_aio_finish(aio, 0, nni_msg_len(m));
-		if((a == nni_list_first(&s->paq))!=NULL) {
-			m           = nni_aio_get_msg(&p->aio_recv);
-			nni_aio_set_msg(&p->aio_recv, NULL);
-			nni_lmq_put(&s->rmq, m);
-			nni_pipe_recv(p->pipe, &p->aio_recv);
+	nni_aio_list_append(&s->raq, aio);// add first
+	nego_combined_msg(s,NULL);
+	if(nni_aio_list_active(aio)){// still in raq means fail
+		if ((rv = nni_aio_schedule(aio, mixclient_recv_cancel, s)) != 0) {
+			nni_aio_finish_error(aio, rv);
+			nni_mtx_unlock(&s->mtx_urq);
+			return;
 		}
-		if (nni_lmq_empty(&s->rmq)) {
-			nni_pollable_clear(&s->readable);
-		}
-		nni_mtx_unlock(&s->mtx);
-		return;
 	}
-
-	// Unbuffered -- but waiting.
-	if (s->rd_ready) {
-		s->rd_ready = false;
-		m           = nni_aio_get_msg(&p->aio_recv);
-		nni_aio_set_msg(&p->aio_recv, NULL);
-		nni_aio_set_msg(aio, m);
-		nni_aio_finish(aio, 0, nni_msg_len(m));
-		nni_pipe_recv(p->pipe, &p->aio_recv);
-		nni_pollable_clear(&s->readable);
-		nni_mtx_unlock(&s->mtx);
-		return;
-	}
-
-	if ((rv = nni_aio_schedule(aio, pair1_cancel, s)) != 0) {
-		nni_aio_finish_error(aio, rv);
-	} else {
-		nni_aio_list_append(&s->raq, aio);
-	}
-	nni_mtx_unlock(&s->mtx);
+	nni_mtx_unlock(&s->mtx_urq);
 	return;
 }
 /*
