@@ -712,13 +712,13 @@ NNG_DECL nng_listener nng_pipe_listener(nng_pipe);
 #define NNG_OPT_INTERFACE_DELAY "interface-delay"
 #define NNG_OPT_INTERFACE_BW "interface-bindwidth"
 #define NNG_OPT_INTERFACE_RELIABLE "interface-reliable"
-#define NNG_OPT_INTERFACE_SAFE "interface-safe"
+#define NNG_OPT_INTERFACE_SECURITY "interface-security"
 
 //used in mix raw mode, carried by msg header
 #define NNG_MIX_RAW_DELAY 0
 #define NNG_MIX_RAW_BW 1
 #define NNG_MIX_RAW_RELIABLE 2
-#define NNG_MIX_RAW_SAFE 3
+#define NNG_MIX_RAW_SECURITY 3
 
 #define NNG_INTERFACE_NATURE_MAX 4
 #define NNG_INTERFACE_NATURE_MIN 0

@@ -504,10 +504,10 @@ nni_dialer_setopt(
 		nni_mtx_unlock(&d->d_mtx);
 		return (rv);
 	}
-	if (strcmp(name, NNG_OPT_INTERFACE_SAFE) == 0) {
+	if (strcmp(name, NNG_OPT_INTERFACE_SECURITY) == 0) {
 		int rv;
 		nni_mtx_lock(&d->d_mtx);
-		rv = nni_copyin_int(&(d->d_nature.safe), val, sz, NNG_INTERFACE_NATURE_MIN,NNG_INTERFACE_NATURE_MAX,t);
+		rv = nni_copyin_int(&(d->d_nature.security), val, sz, NNG_INTERFACE_NATURE_MIN,NNG_INTERFACE_NATURE_MAX,t);
 		nni_mtx_unlock(&d->d_mtx);
 		return (rv);
 	}
@@ -575,10 +575,10 @@ nni_dialer_getopt(
 		nni_mtx_unlock(&d->d_mtx);
 		return (rv);
 	}
-	if (strcmp(name, NNG_OPT_INTERFACE_SAFE) == 0) {
+	if (strcmp(name, NNG_OPT_INTERFACE_SECURITY) == 0) {
 		int rv;
 		nni_mtx_lock(&d->d_mtx);
-		rv = nni_copyout_int(d->d_nature.safe, valp, szp, t);
+		rv = nni_copyout_int(d->d_nature.security, valp, szp, t);
 		nni_mtx_unlock(&d->d_mtx);
 		return (rv);
 	}

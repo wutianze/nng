@@ -43,7 +43,7 @@ struct nni_dialer {
 		int delay;
 		int bw;
 		int reliable;
-		int safe;
+		int security;
 	}d_nature;
 
 #ifdef NNG_ENABLE_STATS

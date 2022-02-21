@@ -84,10 +84,7 @@ struct mixclient_sock {
 	// for pipe close&start will make changes to them
 	nni_mtx        mtx;	
 	nni_id_map     pipes;
-	nni_list       delay_list;
-	nni_list       bw_list;
-	nni_list       reliable_list;
-	nni_list       security_list;
+	nni_list       plist;
 
 	//policy related
 	//int            recv_policy;
@@ -118,10 +115,12 @@ struct mixclient_pipe {
 	
 	bool            w_ready;
 
-	nni_list_node   node_delay;
-	nni_list_node   node_bw;
-	nni_list_node   node_reliable;
-	nni_list_node   node_safe;
+	int delay;
+	int bw;
+	int reliable;
+	int security;
+
+	nni_list_node   node;
 };
 
 static void
@@ -177,10 +176,7 @@ mixclient_sock_init(void *arg, nni_sock *sock)
 	nni_mtx_init(&s->mtx_urq);
 
 	nni_id_map_init(&s->pipes, 0, 0, false);
-	NNI_LIST_INIT(&s->delay_list, mixclient_pipe, node_delay);
-	NNI_LIST_INIT(&s->bw_list, mixclient_pipe, node_bw);
-	NNI_LIST_INIT(&s->reliable_list, mixclient_pipe, node_reliable);
-	NNI_LIST_INIT(&s->security_list, mixclient_pipe, node_safe);
+	NNI_LIST_INIT(&s->plist, mixclient_pipe, node);
 	nni_lmq_init(&s->urq,4);//should be big enough
 	nni_aio_list_init(&s->raq);
 	nni_aio_list_init(&s->paq);
@@ -326,28 +322,6 @@ mixclient_pipe_init(void *arg, nni_pipe *pipe, void *pair)
 }
 
 static int
-insert_in_pipe_list(nni_list*list_pipe, mixclient_pipe*new_pipe, const char*which){
-	int rv = 0;
-	mixclient_pipe*exist_pipe;
-	int new_val = 0;
-	if((rv = nni_pipe_getopt(new_pipe->pipe, which,&new_val,NULL,NNI_TYPE_INT32))!=0){
-		return rv;
-	}
-	NNI_LIST_FOREACH(list_pipe,exist_pipe){
-		int old_val = 0;
-		if((rv = nni_pipe_getopt(exist_pipe->pipe, which,&old_val,NULL,NNI_TYPE_INT32))!=0){
-			return rv;
-		}
-		if(old_val <= new_val){// new_pipe is better
-			nni_list_insert_before(list_pipe,new_pipe,exist_pipe);
-			return 0;
-		}
-	}
-	nni_list_append(list_pipe,new_pipe);
-	return 0;
-}
-
-static int
 mixclient_pipe_start(void *arg)
 {
 	mixclient_pipe *p = arg;
@@ -361,6 +335,27 @@ mixclient_pipe_start(void *arg)
 		// Peer protocol mismatch.
 		return (NNG_EPROTO);
 	}
+	int new_val =0;
+	if((rv = nni_pipe_getopt(p->pipe, NNG_OPT_INTERFACE_DELAY,&new_val,NULL,NNI_TYPE_INT32))!=0){
+		return rv;
+	}else{
+		p->delay = new_val;
+	}
+	if((rv = nni_pipe_getopt(p->pipe, NNG_OPT_INTERFACE_BW,&new_val,NULL,NNI_TYPE_INT32))!=0){
+		return rv;
+	}else{
+		p->bw = new_val;
+	}
+	if((rv = nni_pipe_getopt(p->pipe, NNG_OPT_INTERFACE_RELIABLE,&new_val,NULL,NNI_TYPE_INT32))!=0){
+		return rv;
+	}else{
+		p->reliable = new_val;
+	}
+	if((rv = nni_pipe_getopt(p->pipe, NNG_OPT_INTERFACE_SECURITY,&new_val,NULL,NNI_TYPE_INT32))!=0){
+		return rv;
+	}else{
+		p->security = new_val;
+	}
 	nni_mtx_lock(&s->mtx);
 	// add the new pipe in sock
 	id = nni_pipe_id(p->pipe);
@@ -368,23 +363,9 @@ mixclient_pipe_start(void *arg)
 		nni_mtx_unlock(&s->mtx);
 		return (rv);
 	}
-	if ((rv = insert_in_pipe_list(&s->delay_list,p,NNG_OPT_INTERFACE_DELAY))!=0){
-		nni_mtx_unlock(&s->mtx);
-		return rv;
-	}
-	if ((rv = insert_in_pipe_list(&s->bw_list,p,NNG_OPT_INTERFACE_BW))!=0){
-		nni_mtx_unlock(&s->mtx);
-		return rv;
-	}
-	if ((rv = insert_in_pipe_list(&s->reliable_list,p,NNG_OPT_INTERFACE_RELIABLE))!=0){
-		nni_mtx_unlock(&s->mtx);
-		return rv;
-	}
-	if ((rv = insert_in_pipe_list(&s->safe_list,p,NNG_OPT_INTERFACE_SAFE))!=0){
-		nni_mtx_unlock(&s->mtx);
-		return rv;
-	}
+	nni_list_append(&s->plist, p);
 	nni_mtx_unlock(&s->mtx);
+	
 
 	//start send
 	mixclient_send_sched(p);
@@ -409,10 +390,7 @@ mixclient_pipe_close(void *arg)
 	nni_mtx_unlock(&p->mtx_send);
 	nni_mtx_lock(&s->mtx);
 	nni_id_remove(&s->pipes, nni_pipe_id(p->pipe));
-	nni_list_node_remove(&p->node_delay);
-	nni_list_node_remove(&p->node_bw);
-	nni_list_node_remove(&p->node_reliable);
-	nni_list_node_remove(&p->node_safe);
+	nni_list_node_remove(&p->node);
 	nni_mtx_unlock(&s->mtx);
 }
 
@@ -787,34 +765,6 @@ msg_error:
 	return;
 }
 
-// return the first pipe in the chosen_list
-static mixclient_pipe*
-pipe_from_nature_list(uint8_t nature, mixclient_sock*s){
-	switch(nature){
-			case NNG_MIX_RAW_DELAY:
-				if(!nni_list_empty(&s->delay_list)){
-					return nni_list_first(&s->delay_list);
-				}
-			break;
-			case NNG_MIX_RAW_BW:
-				if(!nni_list_empty(&s->bw_list)){
-					return nni_list_first(&s->bw_list);
-				}
-			break;
-			case NNG_MIX_RAW_RELIABLE:
-				if(!nni_list_empty(&s->reliable_list)){
-					return nni_list_first(&s->reliable_list);
-				}
-			break;
-			//Other msgs use the safest pipe
-			default:	
-				if(!nni_list_empty(&s->security_list)){
-					return nni_list_first(&s->security_list);
-				}
-	}
-	return NULL;
-}
-
 static void mixclient_pipe_send(mixclient_pipe *p, nni_msg *m){
 	NNI_ASSERT(!nni_msg_shared(m));
 	nni_aio_set_msg(&p->aio_send,m);
@@ -933,10 +883,31 @@ mixclient_sock_send(void *arg, nni_aio *aio)// the rv is handled by user, dont n
 				goto send_fail;
 			}
 		}else{
-			if((p = pipe_from_nature_list(nature_chosen,s)) == NULL){
+			mixclient_pipe* first_pipe = nni_list_first(&s->plist);
+			if(first_pipe == NULL){
 				BUMP_STAT(&s->stat_tx_drop);
 				nni_mtx_unlock(&s->mtx);
 				goto send_fail;
+			}
+			mixclient_pipe* second_pipe = nni_list_next(&s->plist,first_pipe);
+			if(second_pipe == NULL){
+				p = first_pipe;
+			} else {
+				switch (nature_chosen) {
+				case NNG_MIX_RAW_DELAY:
+					p = first_pipe->delay > second_pipe->delay?first_pipe:second_pipe;
+					break;
+				case NNG_MIX_RAW_BW:
+					p = first_pipe->bw > second_pipe->bw?first_pipe:second_pipe;
+					break;
+				case NNG_MIX_RAW_RELIABLE:
+					p = first_pipe->reliable > second_pipe->reliable?first_pipe:second_pipe;
+					break;
+				// Other msgs use the safest pipe
+				default:
+					p = first_pipe->security > second_pipe->security?first_pipe:second_pipe;
+					break;
+				}
 			}
 		}
 		nni_mtx_unlock(&s->mtx);//we find that pipe
