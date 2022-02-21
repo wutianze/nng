@@ -1,3 +1,10 @@
+/*
+ * @Description: 
+ * @Author: Sauron
+ * @Date: 2022-02-19 09:22:01
+ * @LastEditTime: 2022-02-21 23:17:45
+ * @LastEditors: Sauron
+ */
 //
 // Copyright 2018 Staysail Systems, Inc. <info@staysail.tech>
 // Copyright 2018 Capitar IT Group BV <info@capitar.com>
@@ -33,6 +40,7 @@ extern int nni_copyin_size(
 extern int nni_copyin_str(char *, const void *, size_t, size_t, nni_type);
 extern int nni_copyin_ptr(void **, const void *, size_t, nni_type);
 extern int nni_copyin_u64(uint64_t *, const void *, size_t, nni_type);
+extern int nni_copyin_u8(uint8_t *, const void *, size_t, nni_type);
 extern int nni_copyin_sockaddr(nng_sockaddr *, const void *, size_t, nni_type);
 
 // nni_copyout_xxx copies out a type of the named value.  It assumes that
@@ -46,6 +54,7 @@ extern int nni_copyout_size(size_t, void *, size_t *, nni_type);
 extern int nni_copyout_sockaddr(
     const nng_sockaddr *, void *, size_t *, nni_type);
 extern int nni_copyout_u64(uint64_t, void *, size_t *, nni_type);
+extern int nni_copyout_u8(uint8_t, void *, size_t *, nni_type);
 
 // nni_copyout_str copies out a string.  If the type is NNI_TYPE_STRING,
 // then it passes through a pointer, created by nni_strdup().

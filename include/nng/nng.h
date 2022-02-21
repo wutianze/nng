@@ -316,6 +316,7 @@ NNG_DECL int nng_dialer_set_bool(nng_dialer, const char *, bool);
 NNG_DECL int nng_dialer_set_int(nng_dialer, const char *, int);
 NNG_DECL int nng_dialer_set_size(nng_dialer, const char *, size_t);
 NNG_DECL int nng_dialer_set_uint64(nng_dialer, const char *, uint64_t);
+NNG_DECL int nng_dialer_set_uint8(nng_dialer, const char *, uint8_t);
 NNG_DECL int nng_dialer_set_string(nng_dialer, const char *, const char *);
 NNG_DECL int nng_dialer_set_ptr(nng_dialer, const char *, void *);
 NNG_DECL int nng_dialer_set_ms(nng_dialer, const char *, nng_duration);
@@ -327,6 +328,7 @@ NNG_DECL int nng_dialer_get_bool(nng_dialer, const char *, bool *);
 NNG_DECL int nng_dialer_get_int(nng_dialer, const char *, int *);
 NNG_DECL int nng_dialer_get_size(nng_dialer, const char *, size_t *);
 NNG_DECL int nng_dialer_get_uint64(nng_dialer, const char *, uint64_t *);
+NNG_DECL int nng_dialer_get_uint8(nng_dialer, const char *, uint8_t *);
 NNG_DECL int nng_dialer_get_string(nng_dialer, const char *, char **);
 NNG_DECL int nng_dialer_get_ptr(nng_dialer, const char *, void **);
 NNG_DECL int nng_dialer_get_ms(nng_dialer, const char *, nng_duration *);
@@ -727,7 +729,13 @@ NNG_DECL nng_listener nng_pipe_listener(nng_pipe);
 #define NNG_SENDPOLICY_RAW 0 // user decides which interface to use
 #define NNG_SENDPOLICY_DOUBLE 1 // sock decides which interface to use based on the msg's properties
 #define NNG_SENDPOLICY_SAMPLE 2 //sampling the msg and the sampled msg has high priority
-#define NNG_SENDPOLICY_DEFAULT 3 // sock decides which interface to use based on the msg's properties
+#define NNG_SENDPOLICY_CONTROL 3 //control msg for pipe
+#define NNG_SENDPOLICY_DEFAULT 100 // sock decides which interface to use based on the msg's properties
+
+//types of control msg
+#define NNG_MIX_CONTROL_REPLY_NATURE 0
+#define NNG_MIX_CONTROL_REQUEST_NATURE 1
+
 // urgent level of msg
 #define NNG_MSG_URGENT 0 
 #define NNG_MSG_NORMAL 1

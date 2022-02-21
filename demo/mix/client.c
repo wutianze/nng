@@ -64,10 +64,10 @@ client(const char *url, const char *msecstr, const char* numstr)
                 fatal("nng_dialer_create", rv);
         }
         printf("start dialer\n");
-        if((rv = nng_dialer_set_int(tmpd,NNG_OPT_INTERFACE_DELAY,4))!=0){
+        if((rv = nng_dialer_set_u8(tmpd,NNG_OPT_INTERFACE_DELAY,4))!=0){
                 fatal("nng_dialer set INTERFACE_DELAY", rv);
         }
-        if((rv = nng_dialer_set_int(tmpd,NNG_OPT_INTERFACE_BW,0))!=0){
+        if((rv = nng_dialer_set_u8(tmpd,NNG_OPT_INTERFACE_BW,0))!=0){
                 fatal("nng_dialer set INTERFACE_BW", rv);
         }
         printf("start bind\n");

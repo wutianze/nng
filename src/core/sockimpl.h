@@ -40,10 +40,10 @@ struct nni_dialer {
 	
 	// used by mix protocol
 	struct{
-		int delay;
-		int bw;
-		int reliable;
-		int security;
+		uint8_t delay;
+		uint8_t bw;
+		uint8_t reliable;
+		uint8_t security;
 	}d_nature;
 
 #ifdef NNG_ENABLE_STATS

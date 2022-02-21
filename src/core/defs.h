@@ -147,6 +147,7 @@ typedef enum {
 	NNI_TYPE_STRING,
 	NNI_TYPE_SOCKADDR,
 	NNI_TYPE_POINTER,
+	NNI_TYPE_UINT8,
 } nni_type;
 
 typedef nni_type nni_opt_type;

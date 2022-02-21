@@ -204,6 +204,30 @@ nni_copyin_u64(uint64_t *up, const void *v, size_t sz, nni_type t)
 }
 
 int
+nni_copyin_u8(uint8_t *up, const void *v, size_t sz, nni_type t)
+{
+	uint8_t u;
+
+	switch (t) {
+	case NNI_TYPE_UINT8:
+		u = *(uint8_t *) v;
+		break;
+	case NNI_TYPE_OPAQUE:
+		if (sz != sizeof(u)) {
+			return (NNG_EINVAL);
+		}
+		memcpy(&u, v, sz);
+		break;
+	default:
+		return (NNG_EBADTYPE);
+	}
+	if (up != NULL) {
+		*up = u;
+	}
+	return (0);
+}
+
+int
 nni_copyin_sockaddr(nng_sockaddr *ap, const void *v, size_t sz, nni_type t)
 {
 	nng_sockaddr a;
@@ -335,6 +359,20 @@ nni_copyout_u64(uint64_t u, void *dst, size_t *szp, nni_type t)
 	switch (t) {
 	case NNI_TYPE_UINT64:
 		*(uint64_t *) dst = u;
+		return (0);
+	case NNI_TYPE_OPAQUE:
+		return (nni_copyout(&u, sizeof(u), dst, szp));
+	default:
+		return (NNG_EBADTYPE);
+	}
+}
+
+int
+nni_copyout_u8(uint8_t u, void *dst, size_t *szp, nni_type t)
+{
+	switch (t) {
+	case NNI_TYPE_UINT8:
+		*(uint8_t *) dst = u;
 		return (0);
 	case NNI_TYPE_OPAQUE:
 		return (nni_copyout(&u, sizeof(u), dst, szp));

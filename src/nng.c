@@ -730,6 +730,12 @@ nng_dialer_set_uint64(nng_dialer id, const char *n, uint64_t v)
 }
 
 int
+nng_dialer_set_uint8(nng_dialer id, const char *n, uint8_t v)
+{
+	return (dialer_set(id, n, &v, sizeof(v), NNI_TYPE_UINT8));
+}
+
+int
 nng_dialer_set_ms(nng_dialer id, const char *n, nng_duration v)
 {
 	return (dialer_set(id, n, &v, sizeof(v), NNI_TYPE_DURATION));
@@ -799,6 +805,12 @@ int
 nng_dialer_get_uint64(nng_dialer id, const char *n, uint64_t *v)
 {
 	return (dialer_get(id, n, v, NULL, NNI_TYPE_UINT64));
+}
+
+int
+nng_dialer_get_uint8(nng_dialer id, const char *n, uint8_t *v)
+{
+	return (dialer_get(id, n, v, NULL, NNI_TYPE_UINT8));
 }
 
 int
