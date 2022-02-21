@@ -89,17 +89,18 @@ struct mixserver_sock {
 struct mixserver_pipe {
 	nni_pipe       *pipe;
 	mixserver_sock       *pair;
-	nni_msgq       *send_queue;
+	mixserver_app    *app;
+
+	nni_mtx         mtx_send;
+	nni_lmq       	send_queue;
 	nni_aio         aio_send;
 	nni_aio         aio_recv;
-	nni_aio         aio_get;
 	nni_aio         aio_put;
 
 	// point to the app the pipe belongs to
 	// be initialized once the first msg received
 	// won't be deleted when this pipe is closed
 	// stored in the map in sock
-	mixserver_app    *app;
 
 	nni_list_node    node;
 };
@@ -107,7 +108,7 @@ struct mixserver_pipe {
 struct mixserver_app{
 	nni_list     plist;
 	nni_list     waq;
-	nni_lmq      readyq;
+	nni_lmq      urq;
 	nni_aio      aio_put;
 	nni_aio      aio_get;
 	nni_mtx      mtx;

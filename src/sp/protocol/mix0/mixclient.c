@@ -115,6 +115,7 @@ struct mixclient_pipe {
 	
 	bool            w_ready;
 
+	//may need a mtx later
 	int delay;
 	int bw;
 	int reliable;
@@ -319,6 +320,11 @@ mixclient_pipe_init(void *arg, nni_pipe *pipe, void *pair)
 	p->pair = pair;
 
 	return (0);
+}
+
+static void
+send_control_msg(nni_msg*,){
+//build header automatically
 }
 
 static int
