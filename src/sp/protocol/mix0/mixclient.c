@@ -323,55 +323,54 @@ mixclient_pipe_init(void *arg, nni_pipe *pipe, void *pair)
 }
 
 static void
-send_control_msg(uint8_t type,mixclient_pipe*p){
-//build header automatically
-nni_msg* msg;
-nni_msg_alloc(&msg,0);
-nni_time now = nni_clock();
-if((nni_msg_header_insert_u64(msg, now) != 0) || (nni_msg_header_append_u8(msg,NNG_MSG_URGENT) != 0) ||
-(nni_msg_header_append_u32(msg,0) != 0) || (nni_msg_header_append_u8(msg,NNG_SENDPOLICY_CONTROL) != 0) ||
-(nni_msg_header_append_u8(msg,type) != 0)
-){
-	goto send_fail;
-}
-switch(type){
-	case NNG_MIX_CONTROL_REQUEST_NATURE:
-	break;
-	case NNG_MIX_CONTROL_REPLY_NATURE:
-	if((nni_msg_append(msg,&p->delay,sizeof(uint8_t))!=0)||(nni_msg_append(msg,&p->bw,sizeof(uint8_t))!=0)||
-	(nni_msg_append(msg,&p->reliable,sizeof(uint8_t))!=0)||(nni_msg_append(msg,&p->security,sizeof(uint8_t))!=0)){
+send_control_msg(uint8_t type, mixclient_pipe *p)
+{
+	// build header automatically
+	nni_msg *msg;
+	nni_msg_alloc(&msg, 0);
+	nni_time now = nni_clock();
+	if ((nni_msg_header_insert_u64(msg, now) != 0) ||
+	    (nni_msg_header_append_u8(msg, NNG_MSG_URGENT) != 0) ||
+	    (nni_msg_header_append_u32(msg, 0) != 0) ||
+	    (nni_msg_header_append_u8(msg, NNG_SENDPOLICY_CONTROL) != 0) ||
+	    (nni_msg_header_append_u8(msg, type) != 0)) {
 		goto send_fail;
 	}
-	break;
+	switch (type) {
+	case NNG_MIX_CONTROL_REQUEST_NATURE:
+		break;
+	case NNG_MIX_CONTROL_REPLY_NATURE:
+		if ((nni_msg_append(msg, &p->delay, sizeof(uint8_t)) != 0) ||
+		    (nni_msg_append(msg, &p->bw, sizeof(uint8_t)) != 0) ||
+		    (nni_msg_append(msg, &p->reliable, sizeof(uint8_t)) !=
+		        0) ||
+		    (nni_msg_append(msg, &p->security, sizeof(uint8_t)) !=
+		        0)) {
+			goto send_fail;
+		}
+		break;
 	default:
-	goto send_fail;
-}
-nni_mtx_lock(&p->mtx_send);
-if(p->w_ready){
-			nni_aio_set_msg(aio,NULL);
-			nni_aio_finish(aio,0,len);
-			mixclient_pipe_send(p,msg);
-			nni_mtx_unlock(&p->mtx_send);
-			return;
-		}
+		goto send_fail;
+	}
+	nni_mtx_lock(&p->mtx_send);
+	if (p->w_ready) {
+		mixclient_pipe_send(p, msg);
+		nni_mtx_unlock(&p->mtx_send);
+		return;
+	}
 
-		// queue it
-		if(nni_lmq_put(&p->send_queue,msg) == 0){
-			nni_aio_set_msg(aio,NULL);
-			nni_aio_finish(aio,0,len);
-			nni_mtx_unlock(&p->mtx_send);
-			return;
-		}
-		// let aio wait
-		if((rv = nni_aio_schedule(aio,mixclient_send_cancel,p))!=0){
-			nni_aio_finish_error(aio,rv);
-			nni_mtx_unlock(&p->mtx_send);
-			return;
-		}
-		nni_aio_list_append(&p->waq,aio);
-nni_mtx_unlock(&p->mtx_send);
+	// queue it
+	if (nni_lmq_full(&p->send_queue)) {
+		// make space for the new msg, it will make msg lost but the control msg is the most important
+		nni_msg *old;
+		nni_lmq_get(&p->send_queue, &old); // should never fail
+		nni_msg_free(old);
+	}
+	nni_lmq_put(&p->send_queue, msg); // should never fail
+	nni_mtx_unlock(&p->mtx_send);
+	return;
 
-send_fail:
+send_fail://wont unlock, pay attention
 	nni_msg_free(msg);
 	return;
 }
