@@ -63,7 +63,7 @@ struct mixclient_recv_policy_ops{
 
 typedef struct mixclient_send_policy_ops mixclient_send_policy_ops;
 typedef struct mixclient_recv_policy_ops mixclient_recv_policy_ops;
-*/ 
+*/
 // mixclient_sock is our per-socket protocol private structure.
 struct mixclient_sock {
 	nni_sock      *sock;
@@ -425,7 +425,7 @@ mixclient_pipe_start(void *arg)
 	// And the pipe read of course.
 	nni_pipe_recv(p->pipe, &p->aio_recv);
 
-	send_control_msg(NNG_MIX_CONTROL_REPLY_NATURE,p);
+	// TODO, not now,send_control_msg(NNG_MIX_CONTROL_REPLY_NATURE,p);
 
 	return (0);
 }
@@ -461,17 +461,21 @@ static nni_msg* generate_combined_msg(mixclient_sock*s, nni_aio* cancel_aio){
 		}
 	}
 	
-	while((first_aio = nni_list_first(&s->paq))!=NULL){
-		uint64_t tmp_time = nni_msg_header_peek_at_u64(nni_aio_get_msg(first_aio),8);
+	nni_aio* each_aio = nni_list_first(&s->paq);
+	while(each_aio != NULL){
+		uint64_t tmp_time = nni_msg_header_peek_at_u64(nni_aio_get_msg(each_aio),8);
 		if(tmp_time <= s->current_time){
-			nni_aio_list_remove(first_aio);
-			nni_aio_finish_sync(first_aio,NNG_WMIX,0);//not real error, but inform put_cb to free the msg
+			nni_aio_list_remove(each_aio);
+			nni_aio_finish(each_aio,NNG_WMIX,0);//not real error, but inform put_cb to free the msg
+			each_aio = nni_list_first(&s->paq);
+			continue;
 		}
+		each_aio = nni_list_next(&s->paq,each_aio);
 	}
 	if((first_aio = nni_list_first(&s->paq)) == NULL){
 		return NULL;//no aio
 	}
-	if((second_aio = nni_list_first(&s->paq)) == NULL){
+	if((second_aio = nni_list_next(&s->paq,first_aio)) == NULL){
 		//only first aio
 		nni_msg* tmp_msg = nni_aio_get_msg(first_aio);
 		policy           = nni_msg_header_peek_at_u8(tmp_msg, 8);
@@ -593,11 +597,11 @@ static nni_msg* generate_combined_msg(mixclient_sock*s, nni_aio* cancel_aio){
 							s->current_time = old_time;
 							nni_aio_set_msg(old_aio, NULL);
 							nni_aio_list_remove(old_aio);
-							nni_aio_finish_sync(old_aio,0,old_len);//not real error, but inform put_cb to free the msg
+							nni_aio_finish(old_aio,0,old_len);//not real error, but inform put_cb to free the msg
 							return old_msg;
 						}
 						nni_aio_list_remove(old_aio);
-						nni_aio_finish_sync(old_aio,NNG_WMIX,0);//not real error, but inform put_cb to free the msg
+						nni_aio_finish(old_aio,NNG_WMIX,0);//not real error, but inform put_cb to free the msg
 						nni_msg* cancel_msg = nni_aio_get_msg(cancel_aio);
 						s->current_time = nni_msg_header_peek_at_u64(cancel_msg,0);
 						nni_aio_set_msg(cancel_aio, NULL);
@@ -631,11 +635,11 @@ static nni_msg* generate_combined_msg(mixclient_sock*s, nni_aio* cancel_aio){
 							s->current_time = old_time;
 							nni_aio_set_msg(old_aio, NULL);
 							nni_aio_list_remove(old_aio);
-							nni_aio_finish_sync(old_aio,0,old_len);//not real error, but inform put_cb to free the msg
+							nni_aio_finish(old_aio,0,old_len);//not real error, but inform put_cb to free the msg
 							return old_msg;
 						}
 						nni_aio_list_remove(old_aio);
-						nni_aio_finish_sync(old_aio,NNG_WMIX,0);//not real error, but inform put_cb to free the msg
+						nni_aio_finish(old_aio,NNG_WMIX,0);//not real error, but inform put_cb to free the msg
 						nni_msg* cancel_msg = nni_aio_get_msg(cancel_aio);
 						s->current_time = nni_msg_header_peek_at_u64(cancel_msg,0);
 						nni_aio_set_msg(cancel_aio, NULL);
@@ -669,6 +673,7 @@ static nni_msg* generate_combined_msg(mixclient_sock*s, nni_aio* cancel_aio){
 static void
 nego_combined_msg(mixclient_sock *s,nni_aio* cancel_aio){// aio_put and reader aio must be in the waiting list already
 	nni_aio* reader;
+	nni_msg *new = generate_combined_msg(s,cancel_aio);
 	while((reader = nni_list_first(&s->raq))!=NULL){
 		if (!nni_lmq_empty(&s->urq)) {
 			nni_msg *old;
@@ -676,22 +681,23 @@ nego_combined_msg(mixclient_sock *s,nni_aio* cancel_aio){// aio_put and reader a
 			nni_aio_list_remove(reader);
 			nni_aio_set_msg(reader,old);
 			nni_aio_finish_sync(reader,0,nni_msg_len(old));
-			nni_msg *new = generate_combined_msg(s,cancel_aio);
-			if(new != NULL)nni_lmq_put(&s->urq, new); // should never fail
+			if(new != NULL){
+				nni_lmq_put(&s->urq, new); // should never fail
+				new = NULL;
+			}
 			continue;
 		}
-		nni_msg *new = generate_combined_msg(s,cancel_aio);// most time, new is NULL
 		if(new != NULL){
 			nni_aio_list_remove(reader);
 			nni_aio_set_msg(reader,new);
 			nni_aio_finish_sync(reader,0,nni_msg_len(new));
+			new = NULL;
 			continue;
 		}
 		// no msg available, and generate fail, we should not generate again
 		return;
 	}
 	//no more reader
-	nni_msg *new = generate_combined_msg(s,cancel_aio);
 	if(new == NULL)return;
 	if (nni_lmq_full(&s->urq)) {
 		// make space for the new msg
@@ -820,7 +826,8 @@ msg_error:
 	return;
 }
 
-static void mixclient_pipe_send(mixclient_pipe *p, nni_msg *m){
+static void 
+mixclient_pipe_send(mixclient_pipe *p, nni_msg *m){
 	NNI_ASSERT(!nni_msg_shared(m));
 	nni_aio_set_msg(&p->aio_send,m);
 	nni_pipe_send(p->pipe,&p->aio_send);
@@ -854,6 +861,7 @@ mixclient_send_sched(mixclient_pipe* p){
 		nni_aio_set_msg(a,NULL);
 		nni_aio_finish_sync(a,0,l);
 	}
+	// w_ready is true, wait for write aio
 }
 
 static void
@@ -895,6 +903,23 @@ mixclient_recv_cancel(nni_aio *aio, void *arg, int rv)
 		nni_aio_finish_error(aio, rv);
 	}
 	nni_mtx_unlock(&s->mtx_urq);
+}
+
+static void
+get_two_pipes(mixclient_pipe** first, mixclient_pipe**second,mixclient_sock*s){
+//TODO
+	nni_mtx_lock(&s->mtx);
+	mixclient_pipe* first_pipe = nni_list_first(&s->plist);
+	if(first_pipe == NULL){
+		nni_mtx_unlock(&s->mtx);
+		goto send_fail;
+	}
+	mixclient_pipe* second_pipe = nni_list_next(&s->plist,first_pipe);
+	if(second_pipe == NULL){
+		nni_mtx_unlock(&s->mtx);
+		goto send_fail;
+	}
+	nni_mtx_unlock(&s->mtx);
 }
 
 static void
@@ -1002,9 +1027,13 @@ mixclient_sock_send(void *arg, nni_aio *aio)// the rv is handled by user, dont n
 			goto send_fail;
 		}
 		nni_mtx_lock(&s->mtx);
-		mixclient_pipe* first_pipe = nni_list_first(&s->delay_list);
-		mixclient_pipe* second_pipe = nni_list_next(&s->delay_list,first_pipe);
-		if(first_pipe == NULL || second_pipe == NULL){
+		mixclient_pipe* first_pipe = nni_list_first(&s->plist);
+		if(first_pipe == NULL){
+			nni_mtx_unlock(&s->mtx);
+			goto send_fail;
+		}
+		mixclient_pipe* second_pipe = nni_list_next(&s->plist,first_pipe);
+		if(second_pipe == NULL){
 			nni_mtx_unlock(&s->mtx);
 			goto send_fail;
 		}

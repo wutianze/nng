@@ -706,8 +706,6 @@ NNG_DECL nng_listener nng_pipe_listener(nng_pipe);
 #define NNG_OPT_RECVMAXSZ "recv-size-max"
 #define NNG_OPT_RECONNMINT "reconnect-time-min"
 #define NNG_OPT_RECONNMAXT "reconnect-time-max"
-#define NNG_OPT_MIX_SENDPOLICY "mix-send-policy"
-#define NNG_OPT_MIX_RECVPOLICY "mix-recv-policy"
 
 // These options are mostly used in mix protocol(set in nni_dialer), value ranges from 0 to 5
 // For value, bigger is better.
