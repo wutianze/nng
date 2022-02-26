@@ -907,25 +907,21 @@ mixclient_recv_cancel(nni_aio *aio, void *arg, int rv)
 
 static void
 get_two_pipes(mixclient_pipe** first, mixclient_pipe**second,mixclient_sock*s){
-//TODO
-	nni_mtx_lock(&s->mtx);
-	mixclient_pipe* first_pipe = nni_list_first(&s->plist);
-	if(first_pipe == NULL){
-		nni_mtx_unlock(&s->mtx);
-		goto send_fail;
+	*first = nni_list_first(&s->plist);
+	if(*first == NULL){
+		*second = NULL;
+		return;
 	}
-	mixclient_pipe* second_pipe = nni_list_next(&s->plist,first_pipe);
-	if(second_pipe == NULL){
-		nni_mtx_unlock(&s->mtx);
-		goto send_fail;
-	}
-	nni_mtx_unlock(&s->mtx);
+	*second = nni_list_next(&s->plist,*first);
+	return;
 }
 
 static void
 mixclient_sock_send(void *arg, nni_aio *aio)// the rv is handled by user, dont need to remove aio from list
 {
 	mixclient_sock *s = arg;
+	mixclient_pipe *first_pipe = NULL;
+	mixclient_pipe *second_pipe = NULL;
 	int rv;
 
 	nni_msg *msg= nni_aio_get_msg(aio);
@@ -963,13 +959,12 @@ mixclient_sock_send(void *arg, nni_aio *aio)// the rv is handled by user, dont n
 				goto send_fail;
 			}
 		}else{
-			mixclient_pipe* first_pipe = nni_list_first(&s->plist);
+			get_two_pipes(&first_pipe,&second_pipe,s);
 			if(first_pipe == NULL){
 				BUMP_STAT(&s->stat_tx_drop);
 				nni_mtx_unlock(&s->mtx);
 				goto send_fail;
 			}
-			mixclient_pipe* second_pipe = nni_list_next(&s->plist,first_pipe);
 			if(second_pipe == NULL){
 				p = first_pipe;
 			} else {
@@ -1027,13 +1022,8 @@ mixclient_sock_send(void *arg, nni_aio *aio)// the rv is handled by user, dont n
 			goto send_fail;
 		}
 		nni_mtx_lock(&s->mtx);
-		mixclient_pipe* first_pipe = nni_list_first(&s->plist);
-		if(first_pipe == NULL){
-			nni_mtx_unlock(&s->mtx);
-			goto send_fail;
-		}
-		mixclient_pipe* second_pipe = nni_list_next(&s->plist,first_pipe);
-		if(second_pipe == NULL){
+		get_two_pipes(&first_pipe,&second_pipe,s);
+		if(first_pipe == NULL || second_pipe == NULL){
 			nni_mtx_unlock(&s->mtx);
 			goto send_fail;
 		}
@@ -1063,8 +1053,8 @@ mixclient_sock_send(void *arg, nni_aio *aio)// the rv is handled by user, dont n
 				nni_aio_list_append(&first_pipe->waq,aio);
 				aio_used = true;
 			}// rv is TIMEOUT, wont let aio wait
-			nni_mtx_unlock(&first_pipe->mtx_send);
 		}
+		nni_mtx_unlock(&first_pipe->mtx_send);
 
 		nni_mtx_lock(&second_pipe->mtx_send);
 		if(second_pipe->w_ready){

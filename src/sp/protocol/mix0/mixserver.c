@@ -883,6 +883,17 @@ mixserver_pipe_send_cb(void *arg)
 }
 
 static void
+get_two_pipes(mixserver_pipe** first, mixserver_pipe**second,mixserver_app*a){
+	*first = nni_list_first(&a->plist);
+	if(*first == NULL){
+		*second = NULL;
+		return;
+	}
+	*second = nni_list_next(&a->plist,*first);
+	return;
+}
+
+static void
 mixserver_sock_send(void *arg, nni_aio *aio) //TODO
 {
 	mixserver_sock *s = arg;
